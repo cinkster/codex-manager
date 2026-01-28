@@ -1,5 +1,7 @@
 # Codex Manager
 
+# WARNING COMPLETELY LLM/VIBE CODED I HAVE NEVER LOOKED AT THE CODE
+
 Browse and render Codex session `.jsonl` files with a web UI, and optionally share rendered HTML via a dedicated share server (with optional Tailscale integration).
 
 ## Features
