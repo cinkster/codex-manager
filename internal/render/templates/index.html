@@ -1,0 +1,171 @@
+{{ define "index" }}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Sessions</title>
+  {{ template "style" . }}
+</head>
+<body class="{{ .ThemeClass }}">
+  <header>
+    <p class="subtitle">Codex sessions browser</p>
+    <h1 class="page-title">Available Dates</h1>
+  </header>
+  <main>
+    <div class="card search-card">
+      <label class="search-label" for="search-input">Search sessions</label>
+      <input id="search-input" class="search-input" type="search" placeholder="Search across all sessions" autocomplete="off" spellcheck="false">
+      <p id="search-status" class="meta search-status"></p>
+      <ul id="search-results" class="list search-results"></ul>
+    </div>
+    <div class="card">
+      {{ if .Dates }}
+      <ul class="list">
+        {{ range .Dates }}
+        <li>
+          <a href="/{{ .Path }}/">{{ .Label }}</a>
+          <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+        </li>
+        {{ end }}
+      </ul>
+      {{ else }}
+      <p class="meta">No sessions found in {{ .SessionsDir }}</p>
+      {{ end }}
+    </div>
+    <p class="meta">Last scan: {{ .LastScan }}</p>
+  </main>
+  <script>
+    (function () {
+      var input = document.getElementById("search-input");
+      var results = document.getElementById("search-results");
+      var status = document.getElementById("search-status");
+      if (!input || !results || !status) return;
+
+      var minChars = 2;
+      var debounceMs = 250;
+      var timer = null;
+      var controller = null;
+      var lastQuery = "";
+
+      function setStatus(message) {
+        status.textContent = message || "";
+      }
+
+      function clearResults(message) {
+        results.innerHTML = "";
+        setStatus(message);
+      }
+
+      function highlightText(container, text, query) {
+        if (!query) {
+          container.textContent = text;
+          return;
+        }
+        var lowerText = text.toLowerCase();
+        var lowerQuery = query.toLowerCase();
+        var start = 0;
+        var index = lowerText.indexOf(lowerQuery, start);
+        if (index === -1) {
+          container.textContent = text;
+          return;
+        }
+        while (index !== -1) {
+          if (index > start) {
+            container.appendChild(document.createTextNode(text.slice(start, index)));
+          }
+          var mark = document.createElement("mark");
+          mark.textContent = text.slice(index, index + query.length);
+          container.appendChild(mark);
+          start = index + query.length;
+          index = lowerText.indexOf(lowerQuery, start);
+        }
+        if (start < text.length) {
+          container.appendChild(document.createTextNode(text.slice(start)));
+        }
+      }
+
+      function renderResults(data, query) {
+        results.innerHTML = "";
+        if (!data || !data.results || data.results.length === 0) {
+          if (query.length >= minChars) {
+            setStatus("No results.");
+          } else {
+            setStatus("Type at least " + minChars + " characters to search.");
+          }
+          return;
+        }
+        setStatus(data.results.length + " result" + (data.results.length === 1 ? "" : "s") + ".");
+        data.results.forEach(function (item) {
+          var li = document.createElement("li");
+          li.className = "search-result";
+
+          var link = document.createElement("a");
+          link.className = "search-result-link";
+          link.href = "/" + item.path + "/" + item.file + "#line-" + item.line;
+          link.textContent = item.file;
+
+          var meta = document.createElement("span");
+          meta.className = "meta search-result-meta";
+          meta.textContent = item.date + " | Line " + item.line + (item.role ? " | " + item.role : "");
+
+          li.appendChild(link);
+          li.appendChild(meta);
+
+          if (item.preview) {
+            var snippet = document.createElement("div");
+            snippet.className = "search-result-snippet";
+            highlightText(snippet, item.preview, query);
+            li.appendChild(snippet);
+          }
+
+          results.appendChild(li);
+        });
+      }
+
+      function fetchResults(query) {
+        if (controller) {
+          controller.abort();
+        }
+        controller = new AbortController();
+        setStatus("Searching...");
+        fetch("/search?query=" + encodeURIComponent(query) + "&limit=50", {
+          method: "GET",
+          credentials: "same-origin",
+          signal: controller.signal
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("search failed");
+            return response.json();
+          })
+          .then(function (data) {
+            renderResults(data, query);
+          })
+          .catch(function (error) {
+            if (error.name === "AbortError") return;
+            setStatus("Search failed.");
+          });
+      }
+
+      input.addEventListener("input", function () {
+        var query = input.value.trim();
+        if (query === lastQuery) return;
+        lastQuery = query;
+        if (timer) {
+          clearTimeout(timer);
+        }
+        if (query.length < minChars) {
+          clearResults("Type at least " + minChars + " characters to search.");
+          return;
+        }
+        timer = setTimeout(function () {
+          fetchResults(query);
+        }, debounceMs);
+      });
+
+      clearResults("Type at least " + minChars + " characters to search.");
+    })();
+  </script>
+</body>
+</html>
+{{ end }}

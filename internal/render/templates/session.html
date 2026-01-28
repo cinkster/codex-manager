@@ -1,0 +1,113 @@
+{{ define "session" }}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ .File.Name }} - Codex Session</title>
+  {{ template "style" . }}
+</head>
+<body class="{{ .ThemeClass }}">
+  <header>
+    <p class="subtitle"><a href="/">All dates</a> / <a href="/{{ .Date.Path }}/">{{ .Date.Label }}</a></p>
+    <h1 class="page-title">{{ .File.Name }}</h1>
+    <p class="meta">{{ .File.Size }} | {{ .File.ModTime }} | <a href="#" data-copy-id="md-all">Copy as Markdown</a>
+      | <form class="share-form" method="post" action="/share/{{ .Date.Path }}/{{ .File.Name }}">
+        <button class="copy-btn" type="submit">Share</button>
+      </form>
+    </p>
+    <div id="share-banner" class="share-banner" role="status" aria-live="polite"></div>
+    <textarea id="md-all" class="copy-source">{{ .AllMarkdown }}</textarea>
+  </header>
+  <main>
+    {{ if .Meta }}
+    <div class="card">
+      <p class="meta"><span class="tag">Session {{ .Meta.ID }}</span></p>
+      <p class="meta">CWD: {{ .Meta.Cwd }}</p>
+      <p class="meta">Originator: {{ .Meta.Originator }} | CLI: {{ .Meta.CliVersion }}</p>
+      <details>
+        <summary class="meta">Instructions</summary>
+        <pre class="session-content">{{ .Meta.Instructions }}</pre>
+      </details>
+    </div>
+    {{ end }}
+
+    {{ if .Items }}
+      {{ range .Items }}
+      <section id="line-{{ .Line }}" class="session-item {{ .Class }}">
+        <div class="session-header">
+          <span class="session-title">{{ .Title }}</span>
+          <span class="session-type">{{ .Type }}{{ if .Subtype }}:{{ .Subtype }}{{ end }}</span>
+          <span class="meta">{{ .Timestamp }}</span>
+          {{ if .Role }}<span class="tag">{{ .Role }}</span>{{ end }}
+          <span class="meta">Line {{ .Line }}</span>
+          <button class="copy-btn" type="button" data-copy-id="md-{{ .Line }}">Copy Markdown</button>
+        </div>
+        {{ if eq .Subtype "reasoning" }}
+        <details>
+          <summary class="meta">Reveal reasoning</summary>
+          <div class="session-content markdown">{{ .HTML }}</div>
+        </details>
+        {{ else }}
+        <div class="session-content markdown">{{ .HTML }}</div>
+        {{ end }}
+        <textarea id="md-{{ .Line }}" class="copy-source">{{ .Markdown }}</textarea>
+      </section>
+      {{ end }}
+    {{ else }}
+      <p class="meta">No items found in this session.</p>
+    {{ end }}
+  </main>
+  <script>
+    (function () {
+      function copyText(text, target) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).catch(function () {});
+          return;
+        }
+        var area = document.createElement("textarea");
+        area.value = text;
+        area.setAttribute("readonly", "readonly");
+        area.style.position = "absolute";
+        area.style.left = "-9999px";
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        document.body.removeChild(area);
+      }
+
+      document.addEventListener("click", function (event) {
+        var target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        var trigger = target.closest("[data-copy-id]");
+        if (!trigger) return;
+        event.preventDefault();
+        var id = trigger.getAttribute("data-copy-id");
+        if (!id) return;
+        var source = document.getElementById(id);
+        if (!source) return;
+        var text = source.value || source.textContent || "";
+        copyText(text, trigger);
+      });
+
+      var shareForm = document.querySelector(".share-form");
+      var shareBanner = document.getElementById("share-banner");
+      if (shareForm && shareBanner) {
+        shareForm.addEventListener("submit", function (event) {
+          event.preventDefault();
+          fetch(shareForm.action, { method: "POST", credentials: "same-origin" })
+            .then(function (response) { return response.json(); })
+            .then(function (data) {
+              if (!data || !data.url) return;
+              copyText(data.url, shareForm);
+              shareBanner.textContent = "Copied share URL: " + data.url;
+              shareBanner.classList.add("visible");
+            })
+            .catch(function () {});
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
+{{ end }}

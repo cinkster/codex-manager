@@ -1,0 +1,33 @@
+{{ define "day" }}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Sessions - {{ .Date.Label }}</title>
+  {{ template "style" . }}
+</head>
+<body class="{{ .ThemeClass }}">
+  <header>
+    <p class="subtitle"><a href="/">All dates</a></p>
+    <h1 class="page-title">Sessions on {{ .Date.Label }}</h1>
+  </header>
+  <main>
+    <div class="card">
+      {{ if .Sessions }}
+      <ul class="list">
+        {{ range .Sessions }}
+        <li>
+          <a href="/{{ $.Date.Path }}/{{ .Name }}">{{ .Name }}</a>
+          <span class="meta">{{ .Size }} | {{ .ModTime }}</span>
+        </li>
+        {{ end }}
+      </ul>
+      {{ else }}
+      <p class="meta">No sessions found for this date.</p>
+      {{ end }}
+    </div>
+  </main>
+</body>
+</html>
+{{ end }}
