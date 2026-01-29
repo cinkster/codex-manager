@@ -134,7 +134,20 @@
 
           var meta = document.createElement("span");
           meta.className = "meta search-result-meta";
-          meta.textContent = item.date + " | Line " + item.line + (item.role ? " | " + item.role : "");
+          var parts = [];
+          if (item.timestamp) {
+            parts.push(item.timestamp);
+          } else if (item.date) {
+            parts.push(item.date);
+          }
+          if (item.cwd) {
+            parts.push(item.cwd);
+          }
+          parts.push("Line " + item.line);
+          if (item.role) {
+            parts.push(item.role);
+          }
+          meta.textContent = parts.join(" | ");
 
           li.appendChild(link);
           li.appendChild(meta);
