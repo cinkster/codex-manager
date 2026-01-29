@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run codex-manager",
+      "type": "shell",
+      "command": "go run ./cmd/codex-manager",
+      "problemMatcher": "$go",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
