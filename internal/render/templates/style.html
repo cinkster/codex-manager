@@ -129,6 +129,46 @@ header a {
   color: var(--accent);
   text-decoration: none;
 }
+.tabs {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.tabs-secondary {
+  margin-top: 6px;
+}
+.tab {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.tabs-secondary .tab {
+  font-size: 11px;
+  padding: 5px 10px;
+  letter-spacing: 0.06em;
+}
+.tab-label {
+  align-self: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  padding: 4px 2px;
+}
+.tab:hover {
+  color: var(--ink);
+}
+.tab.active {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--accent);
+}
 main {
   padding: 0 32px 48px;
 }
@@ -214,6 +254,31 @@ main {
 }
 .list li:last-child {
   border-bottom: none;
+}
+.dir-item {
+  padding: 10px 12px;
+  margin: 8px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: none;
+  background-clip: padding-box;
+}
+.dir-filter-item {
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+.dir-filter-item.selected {
+  border: 1px solid rgba(92, 199, 230, 0.55);
+  background: rgba(92, 199, 230, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(92, 199, 230, 0.2);
+}
+.link-list a {
+  color: var(--ink);
+  text-decoration: none;
+}
+.link-list a:hover {
+  color: var(--ink);
+  text-decoration: underline;
 }
 .meta {
   color: var(--muted);

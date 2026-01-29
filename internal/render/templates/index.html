@@ -10,7 +10,19 @@
 <body class="{{ .ThemeClass }}">
   <header>
     <p class="subtitle">Codex sessions browser</p>
-    <h1 class="page-title">Available Dates</h1>
+    <h1 class="page-title">{{ if eq .View "dir" }}Available Directories{{ else }}Available Dates{{ end }}</h1>
+    <div class="tabs">
+      <a class="tab {{ if eq .View "date" }}active{{ end }}" href="/?view=date">By date</a>
+      <a class="tab {{ if eq .View "dir" }}active{{ end }}" href="/?view=dir&heat={{ .HeatMode }}">By directory</a>
+    </div>
+    {{ if eq .View "dir" }}
+    <div class="tabs tabs-secondary">
+      <span class="tab-label">Heat</span>
+      <a class="tab {{ if eq .HeatMode "7d" }}active{{ end }}" href="/?view=dir&heat=7d">7d</a>
+      <a class="tab {{ if eq .HeatMode "today" }}active{{ end }}" href="/?view=dir&heat=today">Today</a>
+      <a class="tab {{ if eq .HeatMode "1h" }}active{{ end }}" href="/?view=dir&heat=1h">1h</a>
+    </div>
+    {{ end }}
   </header>
   <main>
     <div class="card search-card">
@@ -20,17 +32,32 @@
       <ul id="search-results" class="list search-results"></ul>
     </div>
     <div class="card">
-      {{ if .Dates }}
-      <ul class="list">
-        {{ range .Dates }}
-        <li>
-          <a href="/{{ .Path }}/">{{ .Label }}</a>
-          <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
-        </li>
+      {{ if eq .View "dir" }}
+        {{ if .Dirs }}
+        <ul class="list link-list">
+          {{ range .Dirs }}
+          <li class="dir-item"{{ if .HeatColor }} style="background-color: {{ .HeatColor }};"{{ end }}>
+            <a href="/dir?cwd={{ .Value | urlquery }}">{{ .Label }}</a>
+            <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+          </li>
+          {{ end }}
+        </ul>
+        {{ else }}
+        <p class="meta">No sessions found in {{ .SessionsDir }}</p>
         {{ end }}
-      </ul>
       {{ else }}
-      <p class="meta">No sessions found in {{ .SessionsDir }}</p>
+        {{ if .Dates }}
+        <ul class="list link-list">
+          {{ range .Dates }}
+          <li>
+            <a href="/{{ .Path }}/">{{ .Label }}</a>
+            <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+          </li>
+          {{ end }}
+        </ul>
+        {{ else }}
+        <p class="meta">No sessions found in {{ .SessionsDir }}</p>
+        {{ end }}
       {{ end }}
     </div>
     <p class="meta">Last scan: {{ .LastScan }}</p>

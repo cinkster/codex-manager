@@ -1,0 +1,34 @@
+{{ define "dir" }}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Sessions - {{ .Dir.Label }}</title>
+  {{ template "style" . }}
+</head>
+<body class="{{ .ThemeClass }}">
+  <header>
+    <p class="subtitle"><a href="/?view=dir">All directories</a></p>
+    <h1 class="page-title">Dates for {{ .Dir.Label }}</h1>
+    <p class="meta">{{ .Dir.Count }} session{{ if ne .Dir.Count 1 }}s{{ end }}</p>
+  </header>
+  <main>
+    <div class="card">
+      {{ if .Dates }}
+      <ul class="list link-list">
+        {{ range .Dates }}
+        <li>
+          <a href="/{{ .Path }}/?cwd={{ $.Dir.Value | urlquery }}">{{ .Label }}</a>
+          <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+        </li>
+        {{ end }}
+      </ul>
+      {{ else }}
+      <p class="meta">No sessions found for this directory.</p>
+      {{ end }}
+    </div>
+  </main>
+</body>
+</html>
+{{ end }}

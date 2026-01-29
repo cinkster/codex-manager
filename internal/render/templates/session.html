@@ -11,12 +11,16 @@
   <header>
     <p class="subtitle"><a href="/">All dates</a> / <a href="/{{ .Date.Path }}/">{{ .Date.Label }}</a></p>
     <h1 class="page-title">{{ .File.Name }}</h1>
-    <p class="meta">{{ .File.Size }} | {{ .File.ModTime }} | <a href="#" data-copy-id="md-all">Copy as Markdown</a>
+    <p class="meta">{{ .File.Size }} | {{ .File.ModTime }} | <a href="#" data-copy-id="md-all">Copy as Markdown</a>{{ if .ResumeCommand }}
+      | <a href="#" data-copy-id="resume-cmd">Copy resume command</a>{{ end }}
       | <form class="share-form" method="post" action="/share/{{ .Date.Path }}/{{ .File.Name }}">
         <button class="copy-btn" type="submit">Share</button>
       </form>
     </p>
     <div id="share-banner" class="share-banner" role="status" aria-live="polite"></div>
+    {{ if .ResumeCommand }}
+    <textarea id="resume-cmd" class="copy-source">{{ .ResumeCommand }}</textarea>
+    {{ end }}
     <textarea id="md-all" class="copy-source">{{ .AllMarkdown }}</textarea>
   </header>
   <main>
