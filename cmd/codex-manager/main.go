@@ -3,9 +3,14 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
+	"strings"
 	"time"
 
 	"codex-manager/internal/config"
@@ -58,8 +63,17 @@ func main() {
 	shareServer := web.NewShareServer(cfg.ShareDir)
 
 	log.Printf("Codex sessions server listening on %s", cfg.Addr)
+	log.Printf("Open the UI at %s", urlForAddr(cfg.Addr))
 	log.Printf("Share server listening on %s", cfg.ShareAddr)
 	log.Printf("Watching sessions in %s", cfg.SessionsDir)
+	if cfg.OpenBrowser {
+		go func() {
+			time.Sleep(250 * time.Millisecond)
+			if err := openBrowser(urlForAddr(cfg.Addr)); err != nil {
+				log.Printf("failed to open browser: %v", err)
+			}
+		}()
+	}
 	go func() {
 		if err := http.ListenAndServe(cfg.ShareAddr, shareServer); err != nil {
 			log.Fatalf("share server error: %v", err)
@@ -78,4 +92,52 @@ func main() {
 	if err := http.ListenAndServe(cfg.Addr, server); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+func urlForAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + strings.TrimRight(addr, "/") + "/"
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "localhost"
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("http://%s:%s/", host, port)
+}
+
+func openBrowser(url string) error {
+	var cmd *exec.Cmd
+	if isWSL() {
+		cmd = exec.Command("cmd.exe", "/c", "start", "", url)
+		return cmd.Start()
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
+}
+
+func isWSL() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	if data, err := os.ReadFile("/proc/version"); err == nil {
+		if strings.Contains(strings.ToLower(string(data)), "microsoft") {
+			return true
+		}
+	}
+	if data, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {
+		if strings.Contains(strings.ToLower(string(data)), "microsoft") {
+			return true
+		}
+	}
+	return false
 }
