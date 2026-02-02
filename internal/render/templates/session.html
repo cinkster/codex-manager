@@ -7,12 +7,12 @@
   <title>{{ .File.Name }} - Codex Session</title>
   {{ template "style" . }}
 </head>
-<body class="{{ .ThemeClass }}">
-  <header>
+<body class="{{ .ThemeClass }} has-sticky-header">
+  <header class="sticky-header">
     <p class="subtitle"><a href="/">All dates</a> / <a href="/{{ .Date.Path }}/">{{ .Date.Label }}</a></p>
     <h1 class="page-title">{{ .File.Name }}</h1>
-    <p class="meta">{{ .File.Size }} | {{ .File.ModTime }} | <a href="#" data-copy-id="md-all">Copy as Markdown</a>{{ if .ResumeCommand }}
-      | <a href="#" data-copy-id="resume-cmd">Copy resume command</a>{{ end }}
+    <p class="meta">{{ .File.Size }} | {{ .File.ModTime }}{{ if .File.Cwd }} | CWD: {{ .File.Cwd }}{{ if .ResumeCommand }} (<a href="#" data-copy-id="resume-cmd">Copy resume command</a>){{ end }}{{ end }}{{ if and (not .File.Cwd) .ResumeCommand }}
+      | <a href="#" data-copy-id="resume-cmd">Copy resume command</a>{{ end }} | <a href="#" data-copy-id="md-all">Copy as Markdown</a>
       | <form class="share-form" method="post" action="/share/{{ .Date.Path }}/{{ .File.Name }}">
         <button class="copy-btn" type="submit">Share</button>
       </form>
@@ -44,6 +44,7 @@
           <span class="session-type">{{ .Type }}{{ if .Subtype }}:{{ .Subtype }}{{ end }}</span>
           <span class="meta">{{ .Timestamp }}</span>
           {{ if .Role }}<span class="tag">{{ .Role }}</span>{{ end }}
+          {{ if .AutoCtx }}<span class="tag tag-auto">Auto context</span>{{ end }}
           <span class="meta">Line {{ .Line }}</span>
           <button class="copy-btn" type="button" data-copy-id="md-{{ .Line }}">Copy Markdown</button>
         </div>
@@ -64,6 +65,16 @@
   </main>
   <script>
     (function () {
+      var stickyHeader = document.querySelector("header.sticky-header");
+      var main = document.querySelector("main");
+      function updateStickyOffset() {
+        if (!stickyHeader || !main) return;
+        var height = stickyHeader.offsetHeight;
+        document.documentElement.style.setProperty("--sticky-offset", height + "px");
+      }
+      updateStickyOffset();
+      window.addEventListener("resize", updateStickyOffset);
+
       function copyText(text, target) {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(text).catch(function () {});

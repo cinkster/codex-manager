@@ -163,6 +163,7 @@ type itemView struct {
 	Title     string
 	Content   string
 	Class     string
+	AutoCtx   bool
 	Markdown  string
 	HTML      template.HTML
 }
@@ -527,6 +528,13 @@ func dirLabel(cwd string) string {
 	return cwd
 }
 
+func displayCwd(cwd string) string {
+	if sessions.NormalizeCwd(cwd) == sessions.UnknownCwd {
+		return ""
+	}
+	return cwd
+}
+
 func (s *Server) recentCwdCounts(since time.Time) (map[string]int, int) {
 	counts := map[string]int{}
 	max := 0
@@ -655,6 +663,11 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 
 	items := make([]itemView, 0, len(session.Items))
 	for _, item := range session.Items {
+		autoCtx := item.Role == "user" && sessions.IsAutoContextUserMessage(item.Content)
+		renderText := item.Content
+		if autoCtx {
+			renderText = escapeAutoContextTags(renderText)
+		}
 		view := itemView{
 			Line:      item.Line,
 			Timestamp: item.Timestamp,
@@ -665,7 +678,11 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 			Content:   item.Content,
 			Class:     item.Class,
 			Markdown:  renderItemMarkdown(item),
-			HTML:      markdownToHTML(item.Content),
+			HTML:      markdownToHTML(renderText),
+		}
+		if autoCtx {
+			view.AutoCtx = true
+			view.Class = strings.TrimSpace(view.Class + " auto-context")
 		}
 		items = append(items, view)
 	}
@@ -680,6 +697,7 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 			Name:    file.Name,
 			Size:    formatBytes(file.Size),
 			ModTime: formatTime(file.ModTime),
+			Cwd:     displayCwd(sessions.CwdForFile(file)),
 		},
 		Meta:          session.Meta,
 		Items:         items,
@@ -772,6 +790,18 @@ func renderSessionMarkdown(items []sessions.RenderItem) string {
 		parts = append(parts, renderItemMarkdown(item))
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n")) + "\n"
+}
+
+func escapeAutoContextTags(text string) string {
+	replacer := strings.NewReplacer(
+		"<INSTRUCTIONS>", "&lt;INSTRUCTIONS&gt;",
+		"</INSTRUCTIONS>", "&lt;/INSTRUCTIONS&gt;",
+		"<environment_context>", "&lt;environment_context&gt;",
+		"</environment_context>", "&lt;/environment_context&gt;",
+		"<turn_aborted>", "&lt;turn_aborted&gt;",
+		"</turn_aborted>", "&lt;/turn_aborted&gt;",
+	)
+	return replacer.Replace(text)
 }
 
 var markdownEngine = goldmark.New(

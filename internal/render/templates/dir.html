@@ -19,8 +19,10 @@
       <ul class="list link-list">
         {{ range .Dates }}
         <li>
-          <a href="/{{ .Path }}/?cwd={{ $.Dir.Value | urlquery }}">{{ .Label }}</a>
-          <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+          <a class="link-item-link" href="/{{ .Path }}/?cwd={{ $.Dir.Value | urlquery }}">
+            {{ .Label }}
+            <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+          </a>
         </li>
         {{ end }}
       </ul>

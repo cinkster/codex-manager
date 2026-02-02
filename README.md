@@ -85,7 +85,8 @@ systemctl --user enable --now codex-manager
 
 Rebuild + restart after code changes:
 ```bash
-make deploy
+make build
+systemctl --user restart codex-manager
 ```
 
 ## Flags

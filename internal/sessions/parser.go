@@ -431,16 +431,15 @@ func mergeConsecutive(items []RenderItem) []RenderItem {
 	}
 	out := make([]RenderItem, 0, len(items))
 	current := items[0]
-	inUserGroup := isUserMessage(current)
 	for i := 1; i < len(items); i++ {
 		item := items[i]
 		if current.Type == item.Type && current.Subtype == item.Subtype && current.Role == item.Role {
-			if inUserGroup && isUserMessage(item) {
-				current.Content = item.Content
-				current.Line = item.Line
-				current.Timestamp = item.Timestamp
-				current.Raw = item.Raw
-			} else if strings.TrimSpace(item.Content) != "" {
+			if isUserMessage(item) {
+				out = append(out, current)
+				current = item
+				continue
+			}
+			if strings.TrimSpace(item.Content) != "" {
 				if strings.TrimSpace(current.Content) != "" {
 					current.Content = current.Content + "\n\n" + item.Content
 				} else {
@@ -451,7 +450,6 @@ func mergeConsecutive(items []RenderItem) []RenderItem {
 		}
 		out = append(out, current)
 		current = item
-		inUserGroup = isUserMessage(current)
 	}
 	out = append(out, current)
 	return out
@@ -461,6 +459,9 @@ func trimUserRequest(content string) string {
 	if !trimUserRequestEnabled {
 		return content
 	}
+	if IsAutoContextUserMessage(content) {
+		return content
+	}
 	marker := "## My request for Codex:"
 	index := strings.Index(content, marker)
 	if index == -1 {
@@ -468,6 +469,24 @@ func trimUserRequest(content string) string {
 	}
 	trimmed := content[index+len(marker):]
 	return strings.TrimSpace(trimmed)
+}
+
+// IsAutoContextUserMessage reports whether the content looks like auto-injected context.
+func IsAutoContextUserMessage(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	if isAgentsInstructionsOnly(trimmed) {
+		return true
+	}
+	if isTaggedBlocksOnly(trimmed) {
+		return true
+	}
+	if isLegacyCwdOnly(trimmed) {
+		return true
+	}
+	return false
 }
 
 func maybeUpdateMetaCwd(session *Session, content string) {
@@ -504,4 +523,70 @@ func SetTrimUserRequestEnabled(enabled bool) {
 
 func isUserMessage(item RenderItem) bool {
 	return item.Subtype == "message" && item.Role == "user"
+}
+
+func isAgentsInstructionsOnly(text string) bool {
+	if !strings.HasPrefix(text, "# AGENTS.md instructions") {
+		return false
+	}
+	openIdx := strings.Index(text, "<INSTRUCTIONS>")
+	if openIdx == -1 {
+		return false
+	}
+	closeIdx := strings.Index(text, "</INSTRUCTIONS>")
+	if closeIdx == -1 {
+		return false
+	}
+	after := strings.TrimSpace(text[closeIdx+len("</INSTRUCTIONS>"):])
+	return after == ""
+}
+
+func isTaggedBlocksOnly(text string) bool {
+	remaining := text
+	for {
+		remaining = strings.TrimSpace(remaining)
+		if remaining == "" {
+			return true
+		}
+		var ok bool
+		remaining, ok = consumeTaggedBlock(remaining, "<environment_context>", "</environment_context>")
+		if ok {
+			continue
+		}
+		remaining, ok = consumeTaggedBlock(remaining, "<turn_aborted>", "</turn_aborted>")
+		if ok {
+			continue
+		}
+		return false
+	}
+}
+
+func consumeTaggedBlock(text, openTag, closeTag string) (string, bool) {
+	if !strings.HasPrefix(text, openTag) {
+		return text, false
+	}
+	closeIdx := strings.Index(text, closeTag)
+	if closeIdx == -1 {
+		return text, false
+	}
+	rest := text[closeIdx+len(closeTag):]
+	return rest, true
+}
+
+func isLegacyCwdOnly(text string) bool {
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "Current working directory:") {
+			continue
+		}
+		if strings.HasPrefix(line, "CWD:") {
+			continue
+		}
+		return false
+	}
+	return true
 }

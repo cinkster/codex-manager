@@ -22,9 +22,11 @@
       <ul class="list link-list">
         {{ range .Dirs }}
         <li class="dir-filter-item{{ if eq $.SelectedCwd .Value }} selected{{ end }}">
-          <a href="/{{ $.Date.Path }}/?cwd={{ .Value | urlquery }}">{{ .Label }}</a>
-          <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
-          {{ if eq $.SelectedCwd .Value }}<span class="tag">Selected</span>{{ end }}
+          <a class="link-item-link" href="/{{ $.Date.Path }}/?cwd={{ .Value | urlquery }}">
+            {{ .Label }}
+            <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+            {{ if eq $.SelectedCwd .Value }}<span class="tag">Selected</span>{{ end }}
+          </a>
         </li>
         {{ end }}
       </ul>
@@ -35,8 +37,10 @@
       <ul class="list link-list">
         {{ range $index, $session := .Sessions }}
         <li>
-          <a href="/{{ $.Date.Path }}/{{ $session.Name }}">{{ $session.Name }}</a>
-          <span class="meta">{{ $session.Size }} | {{ $session.ModTime }}{{ if $session.Cwd }} | {{ $session.Cwd }}{{ end }}</span>
+          <a class="link-item-link" href="/{{ $.Date.Path }}/{{ $session.Name }}">
+            {{ $session.Name }}
+            <span class="meta">{{ $session.Size }} | {{ $session.ModTime }}{{ if $session.Cwd }} | {{ $session.Cwd }}{{ end }}</span>
+          </a>
         </li>
         {{ end }}
       </ul>

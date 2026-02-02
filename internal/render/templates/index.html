@@ -34,11 +34,20 @@
     <div class="card">
       {{ if eq .View "dir" }}
         {{ if .Dirs }}
-        <ul class="list link-list">
+        <div class="dir-filter-controls">
+          <label class="dir-filter-toggle" for="heat-only-toggle">
+            <input id="heat-only-toggle" class="dir-filter-checkbox" type="checkbox" checked>
+            <span>Only show heat-colored directories</span>
+          </label>
+        </div>
+        <p id="heat-only-empty" class="meta dir-filter-empty" hidden>No heat-colored directories for this range.</p>
+        <ul id="dir-list" class="list link-list">
           {{ range .Dirs }}
-          <li class="dir-item"{{ if .HeatColor }} style="background-color: {{ .HeatColor }};"{{ end }}>
-            <a href="/dir?cwd={{ .Value | urlquery }}">{{ .Label }}</a>
-            <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+          <li class="dir-item" data-has-heat="{{ if .HeatColor }}true{{ else }}false{{ end }}"{{ if .HeatColor }} style="background-color: {{ .HeatColor }};"{{ end }}>
+            <a class="link-item-link" href="/dir?cwd={{ .Value | urlquery }}">
+              {{ .Label }}
+              <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+            </a>
           </li>
           {{ end }}
         </ul>
@@ -50,8 +59,10 @@
         <ul class="list link-list">
           {{ range .Dates }}
           <li>
-            <a href="/{{ .Path }}/">{{ .Label }}</a>
-            <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+            <a class="link-item-link" href="/{{ .Path }}/">
+              {{ .Label }}
+              <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+            </a>
           </li>
           {{ end }}
         </ul>
@@ -204,6 +215,32 @@
       });
 
       clearResults("Type at least " + minChars + " characters to search.");
+    })();
+
+    (function () {
+      var toggle = document.getElementById("heat-only-toggle");
+      var list = document.getElementById("dir-list");
+      var emptyMessage = document.getElementById("heat-only-empty");
+      if (!toggle || !list) return;
+
+      function applyFilter() {
+        var items = list.querySelectorAll(".dir-item");
+        var showHeatOnly = toggle.checked;
+        var visibleCount = 0;
+        for (var i = 0; i < items.length; i++) {
+          var item = items[i];
+          var hasHeat = item.getAttribute("data-has-heat") === "true";
+          var hidden = showHeatOnly && !hasHeat;
+          item.style.display = hidden ? "none" : "";
+          if (!hidden) visibleCount++;
+        }
+        if (emptyMessage) {
+          emptyMessage.hidden = !(showHeatOnly && visibleCount === 0);
+        }
+      }
+
+      toggle.addEventListener("change", applyFilter);
+      applyFilter();
     })();
   </script>
 </body>
