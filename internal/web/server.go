@@ -152,6 +152,8 @@ type sessionPageView struct {
 	AllMarkdown   string
 	ResumeCommand string
 	ThemeClass    string
+	IsJSONL       bool
+	LastUserLine  int
 }
 
 type itemView struct {
@@ -662,6 +664,8 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 	}
 
 	items := make([]itemView, 0, len(session.Items))
+	lastUserLine := 0
+	lastAnyUserLine := 0
 	for _, item := range session.Items {
 		autoCtx := item.Role == "user" && sessions.IsAutoContextUserMessage(item.Content)
 		renderText := item.Content
@@ -684,7 +688,16 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 			view.AutoCtx = true
 			view.Class = strings.TrimSpace(view.Class + " auto-context")
 		}
+		if item.Role == "user" {
+			lastAnyUserLine = item.Line
+			if !autoCtx {
+				lastUserLine = item.Line
+			}
+		}
 		items = append(items, view)
+	}
+	if lastUserLine == 0 {
+		lastUserLine = lastAnyUserLine
 	}
 
 	view := sessionPageView{
@@ -703,7 +716,9 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 		Items:         items,
 		AllMarkdown:   renderSessionMarkdown(session.Items),
 		ResumeCommand: buildResumeCommand(session.Meta),
-		ThemeClass:    s.themeClass,
+		ThemeClass:   s.themeClass,
+		IsJSONL:      strings.HasSuffix(strings.ToLower(file.Name), ".jsonl"),
+		LastUserLine: lastUserLine,
 	}
 	return view, nil
 }

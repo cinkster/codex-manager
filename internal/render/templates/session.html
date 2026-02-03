@@ -12,7 +12,8 @@
     <p class="subtitle"><a href="/">All dates</a> / <a href="/{{ .Date.Path }}/">{{ .Date.Label }}</a></p>
     <h1 class="page-title">{{ .File.Name }}</h1>
     <p class="meta">{{ .File.Size }} | {{ .File.ModTime }}{{ if .File.Cwd }} | CWD: {{ .File.Cwd }}{{ if .ResumeCommand }} (<a href="#" data-copy-id="resume-cmd">Copy resume command</a>){{ end }}{{ end }}{{ if and (not .File.Cwd) .ResumeCommand }}
-      | <a href="#" data-copy-id="resume-cmd">Copy resume command</a>{{ end }} | <a href="#" data-copy-id="md-all">Copy as Markdown</a>
+      | <a href="#" data-copy-id="resume-cmd">Copy resume command</a>{{ end }} | <a href="#" data-copy-id="md-all">Copy thread as Markdown</a>
+      {{ if and .IsJSONL (gt .LastUserLine 0) }}| <a href="#line-{{ .LastUserLine }}">Jump to last user message</a> | <a id="jump-user-prev" href="#" aria-label="Previous user message" title="Previous user message">[&uarr;]</a> <a id="jump-user-next" href="#" aria-label="Next user message" title="Next user message">[&darr;]</a>{{ end }}
       | <form class="share-form" method="post" action="/share/{{ .Date.Path }}/{{ .File.Name }}">
         <button class="copy-btn" type="submit">Share</button>
       </form>
@@ -46,7 +47,8 @@
           {{ if .Role }}<span class="tag">{{ .Role }}</span>{{ end }}
           {{ if .AutoCtx }}<span class="tag tag-auto">Auto context</span>{{ end }}
           <span class="meta">Line {{ .Line }}</span>
-          <button class="copy-btn" type="button" data-copy-id="md-{{ .Line }}">Copy Markdown</button>
+          <button class="copy-btn" type="button" data-copy-id="md-{{ .Line }}" aria-label="Copy Markdown" title="Copy Markdown">📋</button>
+          <button class="copy-btn" type="button" data-copy-link="line-{{ .Line }}" aria-label="Copy Link" title="Copy Link">🔗</button>
         </div>
         {{ if eq .Subtype "reasoning" }}
         <details>
@@ -94,15 +96,25 @@
       document.addEventListener("click", function (event) {
         var target = event.target;
         if (!(target instanceof HTMLElement)) return;
-        var trigger = target.closest("[data-copy-id]");
+        var trigger = target.closest("[data-copy-id],[data-copy-link]");
         if (!trigger) return;
         event.preventDefault();
         var id = trigger.getAttribute("data-copy-id");
-        if (!id) return;
-        var source = document.getElementById(id);
-        if (!source) return;
-        var text = source.value || source.textContent || "";
-        copyText(text, trigger);
+        if (id) {
+          var source = document.getElementById(id);
+          if (!source) return;
+          var text = source.value || source.textContent || "";
+          copyText(text, trigger);
+          return;
+        }
+        var anchorId = trigger.getAttribute("data-copy-link");
+        if (!anchorId) return;
+        var origin = window.location.origin;
+        if (!origin) {
+          origin = window.location.protocol + "//" + window.location.host;
+        }
+        var base = origin + window.location.pathname + window.location.search;
+        copyText(base + "#" + anchorId, trigger);
       });
 
       var shareForm = document.querySelector(".share-form");
@@ -121,6 +133,64 @@
             .catch(function () {});
         });
       }
+
+      var jumpPrev = document.getElementById("jump-user-prev");
+      var jumpNext = document.getElementById("jump-user-next");
+      if (jumpPrev || jumpNext) {
+        var userSections = Array.prototype.slice.call(
+          document.querySelectorAll("section.session-item.role-user")
+        );
+        var getStickyOffset = function () {
+          return stickyHeader ? stickyHeader.offsetHeight : 0;
+        };
+        var getSectionTop = function (section) {
+          var rect = section.getBoundingClientRect();
+          var scrollY = window.scrollY || window.pageYOffset || 0;
+          return rect.top + scrollY;
+        };
+        var scrollToSection = function (section) {
+          if (!section) return;
+          var offset = getStickyOffset() + 8;
+          var top = getSectionTop(section) - offset;
+          if (top < 0) top = 0;
+          if (typeof window.scrollTo === "function") {
+            window.scrollTo({ top: top, behavior: "smooth" });
+          } else {
+            window.scrollTop = top;
+          }
+        };
+        var findCurrentIndex = function () {
+          var offset = getStickyOffset() + 8;
+          var scrollY = window.scrollY || window.pageYOffset || 0;
+          var position = scrollY + offset + 1;
+          var current = -1;
+          for (var i = 0; i < userSections.length; i++) {
+            if (getSectionTop(userSections[i]) <= position) {
+              current = i;
+            } else {
+              break;
+            }
+          }
+          return current;
+        };
+        var goPrev = function (event) {
+          if (event) event.preventDefault();
+          if (!userSections.length) return;
+          var index = findCurrentIndex();
+          var target = index <= 0 ? 0 : index - 1;
+          scrollToSection(userSections[target]);
+        };
+        var goNext = function (event) {
+          if (event) event.preventDefault();
+          if (!userSections.length) return;
+          var index = findCurrentIndex();
+          var target = index < 0 ? 0 : Math.min(index + 1, userSections.length - 1);
+          scrollToSection(userSections[target]);
+        };
+        if (jumpPrev) jumpPrev.addEventListener("click", goPrev);
+        if (jumpNext) jumpNext.addEventListener("click", goNext);
+      }
+
     })();
   </script>
 </body>

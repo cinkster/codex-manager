@@ -12,7 +12,7 @@
     <p class="subtitle"><a href="/">All dates</a>{{ if .SelectedCwdLabel }} / <a href="/?view=dir">All directories</a>{{ end }}</p>
     <h1 class="page-title">Sessions on {{ .Date.Label }}{{ if .SelectedCwdLabel }} – {{ .SelectedCwdLabel }}{{ end }}</h1>
     {{ if .SelectedCwdLabel }}
-    <p class="meta">Directory filter active. <a href="/{{ .Date.Path }}/">Clear filter</a></p>
+    <p class="meta">Directory filter active. <a href="/{{ .Date.Path }}/">Clear filter</a> / <a href="/dir?cwd={{ .SelectedCwd | urlquery }}">View directory dates</a></p>
     {{ end }}
   </header>
   <main>
