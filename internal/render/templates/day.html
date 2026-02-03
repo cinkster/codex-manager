@@ -9,9 +9,9 @@
 </head>
 <body class="{{ .ThemeClass }}">
   <header>
-    <p class="subtitle"><a href="/">All dates</a>{{ if .SelectedCwdLabel }} / <a href="/?view=dir">All directories</a>{{ end }}</p>
+    <p class="subtitle"><a href="/">All dates</a>{{ if .SelectedCwd }} / <a href="/?view=dir">All directories</a> / <a href="/dir?cwd={{ .SelectedCwd | urlquery }}">Directory dates</a>{{ end }}</p>
     <h1 class="page-title">Sessions on {{ .Date.Label }}{{ if .SelectedCwdLabel }} – {{ .SelectedCwdLabel }}{{ end }}</h1>
-    {{ if .SelectedCwdLabel }}
+    {{ if .SelectedCwd }}
     <p class="meta">Directory filter active. <a href="/{{ .Date.Path }}/">Clear filter</a> / <a href="/dir?cwd={{ .SelectedCwd | urlquery }}">View directory dates</a></p>
     {{ end }}
   </header>
