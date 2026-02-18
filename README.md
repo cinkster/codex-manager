@@ -67,15 +67,15 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/makoto/codex-manager
-ExecStart=/home/makoto/codex-manager/bin/codex-manager
+WorkingDirectory=%h/codex-manager
+ExecStart=%h/codex-manager/bin/codex-manager
 Restart=on-failure
 RestartSec=2
 
 [Install]
 WantedBy=default.target
 ```
-Adjust `WorkingDirectory` and `ExecStart` to match your local path.
+`%h` expands to your home directory in systemd user services.
 
 3) Enable and start:
 ```bash

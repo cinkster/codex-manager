@@ -55,6 +55,11 @@
           <summary class="meta">Reveal reasoning</summary>
           <div class="session-content markdown">{{ .HTML }}</div>
         </details>
+        {{ else if .AutoCtx }}
+        <details>
+          <summary class="meta">Reveal Context</summary>
+          <div class="session-content markdown">{{ .HTML }}</div>
+        </details>
         {{ else }}
         <div class="session-content markdown">{{ .HTML }}</div>
         {{ end }}
@@ -138,7 +143,7 @@
       var jumpNext = document.getElementById("jump-user-next");
       if (jumpPrev || jumpNext) {
         var userSections = Array.prototype.slice.call(
-          document.querySelectorAll("section.session-item.role-user")
+          document.querySelectorAll("section.session-item.role-user:not(.auto-context)")
         );
         var getStickyOffset = function () {
           return stickyHeader ? stickyHeader.offsetHeight : 0;
