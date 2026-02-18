@@ -5,7 +5,7 @@ BUILD_OUTPUT ?= $(BINDIR)/$(BIN)
 INSTALL_DIR ?= /usr/local/bin
 RUN_ARGS ?= -ts
 
-.PHONY: build run install clean test
+.PHONY: build run install clean test deploy
 
 build:
 	@mkdir -p $(BINDIR)
@@ -23,3 +23,7 @@ clean:
 
 test:
 	$(GO) test ./...
+
+deploy: build
+	systemctl --user daemon-reload
+	systemctl --user restart codex-manager

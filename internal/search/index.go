@@ -1,6 +1,7 @@
 package search
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,22 +18,29 @@ const (
 
 // Result describes a single search match.
 type Result struct {
-	Date    string `json:"date"`
-	Path    string `json:"path"`
-	File    string `json:"file"`
-	Line    int    `json:"line"`
-	Role    string `json:"role"`
-	Preview string `json:"preview"`
+	Date      string `json:"date"`
+	Timestamp string `json:"timestamp"`
+	Cwd       string `json:"cwd"`
+	Path      string `json:"path"`
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Role      string `json:"role"`
+	Preview   string `json:"preview"`
+
+	sortTime time.Time
 }
 
 type entry struct {
-	date    string
-	path    string
-	file    string
-	line    int
-	role    string
-	content string
-	lower   string
+	date      string
+	timestamp string
+	sortTime  time.Time
+	cwd       string
+	path      string
+	file      string
+	line      int
+	role      string
+	content   string
+	lower     string
 }
 
 type fileIndex struct {
@@ -133,18 +141,24 @@ func (idx *Index) Search(query string, limit int) []Result {
 		}
 		preview := makePreview(item.content, matchIndex, len(q))
 		results = append(results, Result{
-			Date:    item.date,
-			Path:    item.path,
-			File:    item.file,
-			Line:    item.line,
-			Role:    item.role,
-			Preview: preview,
+			Date:      item.date,
+			Timestamp: item.timestamp,
+			Cwd:       item.cwd,
+			Path:      item.path,
+			File:      item.file,
+			Line:      item.line,
+			Role:      item.role,
+			Preview:   preview,
+			sortTime:  item.sortTime,
 		})
-		if len(results) >= limit {
-			break
-		}
 	}
 
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].sortTime.After(results[j].sortTime)
+	})
+	if len(results) > limit {
+		results = results[:limit]
+	}
 	return results
 }
 
@@ -157,19 +171,30 @@ func buildEntries(file sessions.SessionFile) ([]entry, error) {
 	entries := make([]entry, 0, len(session.Items))
 	dateLabel := file.Date.String()
 	datePath := file.Date.Path()
+	cwd := ""
+	if session.Meta != nil && session.Meta.Cwd != "" {
+		cwd = session.Meta.Cwd
+	} else if file.Meta != nil {
+		cwd = file.Meta.Cwd
+	}
+	cwd = sessions.NormalizeCwd(cwd)
 	for _, item := range session.Items {
 		content := strings.TrimSpace(item.Content)
 		if content == "" {
 			continue
 		}
+		timestamp := parseTimestamp(item.Timestamp, file.ModTime)
 		entries = append(entries, entry{
-			date:    dateLabel,
-			path:    datePath,
-			file:    file.Name,
-			line:    item.Line,
-			role:    item.Role,
-			content: content,
-			lower:   strings.ToLower(content),
+			date:      dateLabel,
+			timestamp: formatTimestamp(timestamp),
+			sortTime:  timestamp,
+			cwd:       cwd,
+			path:      datePath,
+			file:      file.Name,
+			line:      item.Line,
+			role:      item.Role,
+			content:   content,
+			lower:     strings.ToLower(content),
 		})
 	}
 	return entries, nil
@@ -211,4 +236,28 @@ func truncate(value string, max int) string {
 		return value[:max]
 	}
 	return value[:max-3] + "..."
+}
+
+func parseTimestamp(value string, fallback time.Time) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	if ts, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return ts
+	}
+	if ts, err := time.Parse(time.RFC3339, value); err == nil {
+		return ts
+	}
+	if ts, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
+		return ts
+	}
+	return fallback
+}
+
+func formatTimestamp(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return ts.Format("2006-01-02 15:04:05")
 }

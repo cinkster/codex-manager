@@ -9,10 +9,13 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +66,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleIndex(w, r)
 		return
 	}
+	if pathValue == "dir" {
+		s.handleDir(w, r)
+		return
+	}
 	if pathValue == "search" {
 		s.handleSearch(w, r)
 		return
@@ -95,32 +102,58 @@ type dateView struct {
 	Count int
 }
 
+type dirView struct {
+	Label       string
+	Value       string
+	Count       int
+	RecentCount int
+	HeatColor   template.CSS
+}
+
 type sessionView struct {
-	Name    string
-	Size    string
-	ModTime string
+	Name          string
+	Size          string
+	ModTime       string
+	ResumeCommand string
+	Cwd           string
 }
 
 type indexView struct {
 	Dates       []dateView
+	Dirs        []dirView
 	SessionsDir string
 	LastScan    string
+	View        string
+	HeatMode    string
 	ThemeClass  string
 }
 
 type dayView struct {
-	Date       dateView
-	Sessions   []sessionView
+	Date             dateView
+	Sessions         []sessionView
+	Dirs             []dirView
+	SelectedCwd      string
+	SelectedCwdLabel string
+	View             string
+	ThemeClass       string
+}
+
+type dirPageView struct {
+	Dir        dirView
+	Dates      []dateView
 	ThemeClass string
 }
 
 type sessionPageView struct {
-	Date        dateView
-	File        sessionView
-	Meta        *sessions.SessionMeta
-	Items       []itemView
-	AllMarkdown string
-	ThemeClass  string
+	Date          dateView
+	File          sessionView
+	Meta          *sessions.SessionMeta
+	Items         []itemView
+	AllMarkdown   string
+	ResumeCommand string
+	ThemeClass    string
+	IsJSONL       bool
+	LastUserLine  int
 }
 
 type itemView struct {
@@ -132,32 +165,68 @@ type itemView struct {
 	Title     string
 	Content   string
 	Class     string
+	AutoCtx   bool
 	Markdown  string
 	HTML      template.HTML
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	dates := s.idx.Dates()
-	views := make([]dateView, 0, len(dates))
-	for _, date := range dates {
-		files := s.idx.SessionsByDate(date)
-		views = append(views, dateView{
-			Label: date.String(),
-			Path:  date.Path(),
-			Count: len(files),
-		})
+	view := r.URL.Query().Get("view")
+	heat := r.URL.Query().Get("heat")
+	if view == "" && r.URL.RawQuery == "" {
+		view = "dir"
+		heat = "1h"
+	} else if view != "dir" {
+		view = "date"
 	}
 
-	lastScan := s.idx.LastUpdated()
-	view := indexView{
-		Dates:       views,
-		SessionsDir: s.sessionsDir,
-		LastScan:    formatScanTime(lastScan),
-		ThemeClass:  s.themeClass,
+	indexView := s.buildIndexView(view, heat)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = s.renderer.Execute(w, "index", indexView)
+}
+
+func (s *Server) handleDir(w http.ResponseWriter, r *http.Request) {
+	cwd := normalizeCwdParam(r.URL.Query().Get("cwd"))
+	if cwd == "" {
+		indexView := s.buildIndexView("dir", r.URL.Query().Get("heat"))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = s.renderer.Execute(w, "index", indexView)
+		return
+	}
+
+	files := s.idx.SessionsByCwd(cwd)
+	counts := make(map[sessions.DateKey]int, len(files))
+	for _, file := range files {
+		counts[file.Date]++
+	}
+
+	dates := s.idx.Dates()
+	dateViews := make([]dateView, 0, len(counts))
+	for _, date := range dates {
+		if count, ok := counts[date]; ok {
+			dateViews = append(dateViews, dateView{
+				Label: date.String(),
+				Path:  date.Path(),
+				Count: count,
+			})
+		}
+	}
+
+	dir := dirView{
+		Label: dirLabel(cwd),
+		Value: cwd,
+		Count: len(files),
+	}
+
+	view := dirPageView{
+		Dir:        dir,
+		Dates:      dateViews,
+		ThemeClass: s.themeClass,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = s.renderer.Execute(w, "index", view)
+	_ = s.renderer.Execute(w, "dir", view)
 }
 
 func (s *Server) handleDay(w http.ResponseWriter, r *http.Request, parts []string) {
@@ -166,14 +235,44 @@ func (s *Server) handleDay(w http.ResponseWriter, r *http.Request, parts []strin
 		http.NotFound(w, r)
 		return
 	}
+	selectedCwd := normalizeCwdParam(r.URL.Query().Get("cwd"))
+	viewMode := strings.TrimSpace(r.URL.Query().Get("view"))
+	if viewMode != "dir" {
+		viewMode = "sessions"
+	}
+
 	files := s.idx.SessionsByDate(date)
-	views := make([]sessionView, 0, len(files))
-	for _, file := range files {
+	dirViews := buildDirViewsFromFiles(files)
+
+	filtered := files
+	if selectedCwd != "" {
+		filtered = make([]sessions.SessionFile, 0, len(files))
+		for _, file := range files {
+			if sessions.CwdForFile(file) == selectedCwd {
+				filtered = append(filtered, file)
+			}
+		}
+	}
+
+	views := make([]sessionView, 0, len(filtered))
+	for _, file := range filtered {
+		resumeCommand := buildResumeCommand(file.Meta)
+		cwd := sessions.CwdForFile(file)
+		if cwd == sessions.UnknownCwd {
+			cwd = ""
+		}
 		views = append(views, sessionView{
-			Name:    file.Name,
-			Size:    formatBytes(file.Size),
-			ModTime: formatTime(file.ModTime),
+			Name:          file.Name,
+			Size:          formatBytes(file.Size),
+			ModTime:       formatTime(file.ModTime),
+			ResumeCommand: resumeCommand,
+			Cwd:           cwd,
 		})
+	}
+
+	selectedLabel := ""
+	if selectedCwd != "" {
+		selectedLabel = dirLabel(selectedCwd)
 	}
 
 	view := dayView{
@@ -182,8 +281,12 @@ func (s *Server) handleDay(w http.ResponseWriter, r *http.Request, parts []strin
 			Path:  date.Path(),
 			Count: len(files),
 		},
-		Sessions:   views,
-		ThemeClass: s.themeClass,
+		Sessions:         views,
+		Dirs:             dirViews,
+		SelectedCwd:      selectedCwd,
+		SelectedCwdLabel: selectedLabel,
+		View:             viewMode,
+		ThemeClass:       s.themeClass,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -334,6 +437,212 @@ func formatScanTime(t time.Time) string {
 	return t.Format(time.RFC3339)
 }
 
+func (s *Server) buildIndexView(view string, heatMode string) indexView {
+	heatMode = parseHeatMode(heatMode)
+	dates := s.idx.Dates()
+	dateViews := make([]dateView, 0, len(dates))
+	for _, date := range dates {
+		files := s.idx.SessionsByDate(date)
+		dateViews = append(dateViews, dateView{
+			Label: date.String(),
+			Path:  date.Path(),
+			Count: len(files),
+		})
+	}
+
+	recentCounts := map[string]int{}
+	recentMax := 0
+	if view == "dir" {
+		now := time.Now()
+		since := now.AddDate(0, 0, -7)
+		allowFallback := true
+		switch heatMode {
+		case "today":
+			since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			allowFallback = false
+		case "1h":
+			since = now.Add(-1 * time.Hour)
+			allowFallback = false
+		}
+		recentCounts, recentMax = s.recentCwdCounts(since)
+		if allowFallback && recentMax == 0 {
+			recentCounts, recentMax = s.recentCwdCountsFromLatestDates(7)
+		}
+	}
+	dirViews := buildDirViewsFromCounts(s.idx.CwdCounts(), recentCounts, recentMax, view == "dir")
+	lastScan := s.idx.LastUpdated()
+
+	return indexView{
+		Dates:       dateViews,
+		Dirs:        dirViews,
+		SessionsDir: s.sessionsDir,
+		LastScan:    formatScanTime(lastScan),
+		View:        view,
+		HeatMode:    heatMode,
+		ThemeClass:  s.themeClass,
+	}
+}
+
+func buildDirViewsFromFiles(files []sessions.SessionFile) []dirView {
+	counts := make(map[string]int, len(files))
+	for _, file := range files {
+		cwd := sessions.CwdForFile(file)
+		counts[cwd]++
+	}
+	return buildDirViewsFromCounts(counts, nil, 0, false)
+}
+
+func buildDirViewsFromCounts(counts map[string]int, recentCounts map[string]int, recentMax int, withHeat bool) []dirView {
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i] == sessions.UnknownCwd {
+			return false
+		}
+		if keys[j] == sessions.UnknownCwd {
+			return true
+		}
+		return keys[i] < keys[j]
+	})
+
+	views := make([]dirView, 0, len(keys))
+	for _, key := range keys {
+		view := dirView{
+			Label: dirLabel(key),
+			Value: key,
+			Count: counts[key],
+		}
+		if withHeat {
+			view.RecentCount = recentCounts[key]
+			view.HeatColor = heatColor(view.RecentCount, recentMax)
+		}
+		views = append(views, view)
+	}
+	return views
+}
+
+func dirLabel(cwd string) string {
+	if sessions.NormalizeCwd(cwd) == sessions.UnknownCwd {
+		return "Unknown (no CWD)"
+	}
+	return cwd
+}
+
+func displayCwd(cwd string) string {
+	if sessions.NormalizeCwd(cwd) == sessions.UnknownCwd {
+		return ""
+	}
+	return cwd
+}
+
+func (s *Server) recentCwdCounts(since time.Time) (map[string]int, int) {
+	counts := map[string]int{}
+	max := 0
+	for _, date := range s.idx.Dates() {
+		files := s.idx.SessionsByDate(date)
+		for _, file := range files {
+			if file.ModTime.Before(since) {
+				continue
+			}
+			cwd := sessions.CwdForFile(file)
+			counts[cwd]++
+			if counts[cwd] > max {
+				max = counts[cwd]
+			}
+		}
+	}
+	return counts, max
+}
+
+func (s *Server) recentCwdCountsFromLatestDates(limit int) (map[string]int, int) {
+	counts := map[string]int{}
+	max := 0
+	if limit <= 0 {
+		return counts, max
+	}
+	dates := s.idx.Dates()
+	if len(dates) > limit {
+		dates = dates[:limit]
+	}
+	for _, date := range dates {
+		files := s.idx.SessionsByDate(date)
+		for _, file := range files {
+			cwd := sessions.CwdForFile(file)
+			counts[cwd]++
+			if counts[cwd] > max {
+				max = counts[cwd]
+			}
+		}
+	}
+	return counts, max
+}
+
+func parseHeatMode(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "today":
+		return "today"
+	case "1h", "1hr", "1hour":
+		return "1h"
+	case "7d", "week", "7days":
+		return "7d"
+	default:
+		return "7d"
+	}
+}
+
+func heatColor(count int, max int) template.CSS {
+	const (
+		hotR     = 210
+		hotG     = 55
+		hotB     = 50
+		alphaMin = 0.25
+		alphaMax = 0.92
+	)
+	if max <= 0 || count <= 0 {
+		return template.CSS("")
+	}
+	ratio := float64(count) / float64(max)
+	if ratio > 1 {
+		ratio = 1
+	}
+	alpha := alphaMin + (alphaMax-alphaMin)*ratio
+	alpha = math.Max(alphaMin, math.Min(alpha, alphaMax))
+	return template.CSS(fmt.Sprintf("rgba(%d, %d, %d, %.3f)", hotR, hotG, hotB, alpha))
+}
+
+func normalizeCwdParam(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.Contains(value, "%") {
+		if decoded, err := url.QueryUnescape(value); err == nil {
+			value = decoded
+		}
+	}
+	return value
+}
+
+func buildResumeCommand(meta *sessions.SessionMeta) string {
+	if meta == nil || meta.ID == "" {
+		return ""
+	}
+	if meta.Cwd != "" {
+		return fmt.Sprintf("cd %s\ncodex resume %s", shellQuote(meta.Cwd), meta.ID)
+	}
+	return fmt.Sprintf("codex resume %s", meta.ID)
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
 func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 	date, ok := sessions.ParseDate(parts[0], parts[1], parts[2])
 	if !ok {
@@ -355,7 +664,14 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 	}
 
 	items := make([]itemView, 0, len(session.Items))
+	lastUserLine := 0
+	lastAnyUserLine := 0
 	for _, item := range session.Items {
+		autoCtx := item.Role == "user" && sessions.IsAutoContextUserMessage(item.Content)
+		renderText := item.Content
+		if autoCtx {
+			renderText = escapeAutoContextTags(renderText)
+		}
 		view := itemView{
 			Line:      item.Line,
 			Timestamp: item.Timestamp,
@@ -366,9 +682,22 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 			Content:   item.Content,
 			Class:     item.Class,
 			Markdown:  renderItemMarkdown(item),
-			HTML:      markdownToHTML(item.Content),
+			HTML:      markdownToHTML(renderText),
+		}
+		if autoCtx {
+			view.AutoCtx = true
+			view.Class = strings.TrimSpace(view.Class + " auto-context")
+		}
+		if item.Role == "user" {
+			lastAnyUserLine = item.Line
+			if !autoCtx {
+				lastUserLine = item.Line
+			}
 		}
 		items = append(items, view)
+	}
+	if lastUserLine == 0 {
+		lastUserLine = lastAnyUserLine
 	}
 
 	view := sessionPageView{
@@ -381,11 +710,15 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 			Name:    file.Name,
 			Size:    formatBytes(file.Size),
 			ModTime: formatTime(file.ModTime),
+			Cwd:     displayCwd(sessions.CwdForFile(file)),
 		},
-		Meta:        session.Meta,
-		Items:       items,
-		AllMarkdown: renderSessionMarkdown(session.Items),
-		ThemeClass:  s.themeClass,
+		Meta:          session.Meta,
+		Items:         items,
+		AllMarkdown:   renderSessionMarkdown(session.Items),
+		ResumeCommand: buildResumeCommand(session.Meta),
+		ThemeClass:   s.themeClass,
+		IsJSONL:      strings.HasSuffix(strings.ToLower(file.Name), ".jsonl"),
+		LastUserLine: lastUserLine,
 	}
 	return view, nil
 }
@@ -472,6 +805,18 @@ func renderSessionMarkdown(items []sessions.RenderItem) string {
 		parts = append(parts, renderItemMarkdown(item))
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n")) + "\n"
+}
+
+func escapeAutoContextTags(text string) string {
+	replacer := strings.NewReplacer(
+		"<INSTRUCTIONS>", "&lt;INSTRUCTIONS&gt;",
+		"</INSTRUCTIONS>", "&lt;/INSTRUCTIONS&gt;",
+		"<environment_context>", "&lt;environment_context&gt;",
+		"</environment_context>", "&lt;/environment_context&gt;",
+		"<turn_aborted>", "&lt;turn_aborted&gt;",
+		"</turn_aborted>", "&lt;/turn_aborted&gt;",
+	)
+	return replacer.Replace(text)
 }
 
 var markdownEngine = goldmark.New(

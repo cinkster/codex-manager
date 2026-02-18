@@ -9,22 +9,43 @@
 </head>
 <body class="{{ .ThemeClass }}">
   <header>
-    <p class="subtitle"><a href="/">All dates</a></p>
-    <h1 class="page-title">Sessions on {{ .Date.Label }}</h1>
+    <p class="subtitle"><a href="/">All dates</a>{{ if .SelectedCwd }} / <a href="/?view=dir">All directories</a> / <a href="/dir?cwd={{ .SelectedCwd | urlquery }}">Directory dates</a>{{ end }}</p>
+    <h1 class="page-title">Sessions on {{ .Date.Label }}{{ if .SelectedCwdLabel }} – {{ .SelectedCwdLabel }}{{ end }}</h1>
+    {{ if .SelectedCwd }}
+    <p class="meta">Directory filter active. <a href="/{{ .Date.Path }}/">Clear filter</a> / <a href="/dir?cwd={{ .SelectedCwd | urlquery }}">View directory dates</a></p>
+    {{ end }}
   </header>
   <main>
+    {{ if .Dirs }}
+    <div class="card">
+      <p class="meta">Filter by directory (click to filter sessions below)</p>
+      <ul class="list link-list">
+        {{ range .Dirs }}
+        <li class="dir-filter-item{{ if eq $.SelectedCwd .Value }} selected{{ end }}">
+          <a class="link-item-link" href="/{{ $.Date.Path }}/?cwd={{ .Value | urlquery }}">
+            {{ .Label }}
+            <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+            {{ if eq $.SelectedCwd .Value }}<span class="tag">Selected</span>{{ end }}
+          </a>
+        </li>
+        {{ end }}
+      </ul>
+    </div>
+    {{ end }}
     <div class="card">
       {{ if .Sessions }}
-      <ul class="list">
-        {{ range .Sessions }}
+      <ul class="list link-list">
+        {{ range $index, $session := .Sessions }}
         <li>
-          <a href="/{{ $.Date.Path }}/{{ .Name }}">{{ .Name }}</a>
-          <span class="meta">{{ .Size }} | {{ .ModTime }}</span>
+          <a class="link-item-link" href="/{{ $.Date.Path }}/{{ $session.Name }}">
+            {{ $session.Name }}
+            <span class="meta">{{ $session.Size }} | {{ $session.ModTime }}{{ if $session.Cwd }} | {{ $session.Cwd }}{{ end }}</span>
+          </a>
         </li>
         {{ end }}
       </ul>
       {{ else }}
-      <p class="meta">No sessions found for this date.</p>
+      <p class="meta">No sessions found{{ if .SelectedCwdLabel }} for this directory{{ end }}.</p>
       {{ end }}
     </div>
   </main>

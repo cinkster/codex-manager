@@ -65,6 +65,21 @@ type eventMsgPayload struct {
 	Message string `json:"message"`
 }
 
+type directMessagePayload struct {
+	Type    string            `json:"type"`
+	Role    string            `json:"role"`
+	Content []responseContent `json:"content"`
+}
+
+type metaLinePayload struct {
+	ID           string  `json:"id"`
+	Timestamp    string  `json:"timestamp"`
+	Cwd          string  `json:"cwd"`
+	Originator   string  `json:"originator"`
+	CliVersion   string  `json:"cli_version"`
+	Instructions *string `json:"instructions"`
+}
+
 // ParseSession reads a jsonl file and returns a parsed Session.
 func ParseSession(path string) (*Session, error) {
 	file, err := os.Open(path)
@@ -111,17 +126,26 @@ func parseLine(lineText string, lineNum int, session *Session) *RenderItem {
 	case "session_meta":
 		var meta SessionMeta
 		if err := json.Unmarshal(env.Payload, &meta); err == nil {
-			session.Meta = &meta
+			applyMeta(session, meta)
 		}
 		return nil
 	case "response_item":
-		return parseResponseItem(env, lineText, lineNum)
+		return parseResponseItem(env, lineText, lineNum, session)
+	case "message":
+		return parseDirectMessage(lineText, lineNum, session)
+	case "reasoning":
+		return parseDirectReasoning(lineText, lineNum)
 	default:
+		if env.Type == "" {
+			if applyMetaLine(session, lineText) {
+				return nil
+			}
+		}
 		return nil
 	}
 }
 
-func parseResponseItem(env envelope, lineText string, lineNum int) *RenderItem {
+func parseResponseItem(env envelope, lineText string, lineNum int, session *Session) *RenderItem {
 	var payload responseItemPayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
 		return nil
@@ -150,6 +174,7 @@ func parseResponseItem(env envelope, lineText string, lineNum int) *RenderItem {
 		item.Content = extractContentText(payload.Content)
 		if payload.Role == "user" {
 			item.Content = trimUserRequest(item.Content)
+			maybeUpdateMetaCwd(session, item.Content)
 		}
 		if item.Content == "" {
 			item.Content = prettyJSON(string(env.Payload))
@@ -171,6 +196,49 @@ func parseResponseItem(env envelope, lineText string, lineNum int) *RenderItem {
 	}
 
 	return &item
+}
+
+func parseDirectMessage(lineText string, lineNum int, session *Session) *RenderItem {
+	var payload directMessagePayload
+	if err := json.Unmarshal([]byte(lineText), &payload); err != nil {
+		return nil
+	}
+	if payload.Role != "user" && payload.Role != "assistant" {
+		return nil
+	}
+	item := RenderItem{
+		Line:    lineNum,
+		Type:    "response_item",
+		Subtype: "message",
+		Role:    payload.Role,
+		Title:   titleForRole(payload.Role),
+	}
+	item.Content = extractContentText(payload.Content)
+	if payload.Role == "user" {
+		item.Content = trimUserRequest(item.Content)
+		maybeUpdateMetaCwd(session, item.Content)
+	}
+	if item.Content == "" {
+		item.Content = prettyJSON(lineText)
+	}
+	item.Class = roleClass(payload.Role)
+	return &item
+}
+
+func parseDirectReasoning(lineText string, lineNum int) *RenderItem {
+	content := extractReasoningSummary(json.RawMessage(lineText))
+	if content == "" {
+		content = prettyJSON(lineText)
+	}
+	return &RenderItem{
+		Line:    lineNum,
+		Type:    "response_item",
+		Subtype: "reasoning",
+		Role:    "assistant",
+		Title:   "Reasoning",
+		Content: content,
+		Class:   roleClass("assistant"),
+	}
 }
 
 func parseEventMsg(env envelope, lineText string, lineNum int) *RenderItem {
@@ -241,6 +309,62 @@ func extractReasoningSummary(raw json.RawMessage) string {
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
+func applyMeta(session *Session, meta SessionMeta) {
+	if session == nil {
+		return
+	}
+	if session.Meta == nil {
+		session.Meta = &SessionMeta{}
+	}
+	mergeMeta(session.Meta, meta)
+}
+
+func mergeMeta(target *SessionMeta, meta SessionMeta) {
+	if target == nil {
+		return
+	}
+	if target.ID == "" {
+		target.ID = meta.ID
+	}
+	if target.Timestamp == "" {
+		target.Timestamp = meta.Timestamp
+	}
+	if target.Cwd == "" {
+		target.Cwd = meta.Cwd
+	}
+	if target.Originator == "" {
+		target.Originator = meta.Originator
+	}
+	if target.CliVersion == "" {
+		target.CliVersion = meta.CliVersion
+	}
+	if target.Instructions == "" {
+		target.Instructions = meta.Instructions
+	}
+}
+
+func applyMetaLine(session *Session, lineText string) bool {
+	var meta metaLinePayload
+	if err := json.Unmarshal([]byte(lineText), &meta); err != nil {
+		return false
+	}
+	if meta.ID == "" && meta.Timestamp == "" && meta.Cwd == "" && meta.Originator == "" && meta.CliVersion == "" && meta.Instructions == nil {
+		return false
+	}
+	merged := SessionMeta{
+		ID:         meta.ID,
+		Timestamp:  meta.Timestamp,
+		Cwd:        meta.Cwd,
+		Originator: meta.Originator,
+		CliVersion: meta.CliVersion,
+	}
+	if meta.Instructions != nil {
+		merged.Instructions = *meta.Instructions
+	}
+	applyMeta(session, merged)
+	return meta.ID != "" || meta.Cwd != "" || meta.Timestamp != ""
+}
+
 func prettyJSON(raw string) string {
 	var buf bytes.Buffer
 	if err := json.Indent(&buf, []byte(raw), "", "  "); err != nil {
@@ -273,6 +397,17 @@ func titleForType(eventType, subType string) string {
 	return strings.ReplaceAll(eventType, "_", " ")
 }
 
+func titleForRole(role string) string {
+	switch strings.ToLower(role) {
+	case "user":
+		return "User"
+	case "assistant":
+		return "Agent"
+	default:
+		return "Message"
+	}
+}
+
 func roleClass(role string) string {
 	switch strings.ToLower(role) {
 	case "user":
@@ -296,16 +431,15 @@ func mergeConsecutive(items []RenderItem) []RenderItem {
 	}
 	out := make([]RenderItem, 0, len(items))
 	current := items[0]
-	inUserGroup := isUserMessage(current)
 	for i := 1; i < len(items); i++ {
 		item := items[i]
 		if current.Type == item.Type && current.Subtype == item.Subtype && current.Role == item.Role {
-			if inUserGroup && isUserMessage(item) {
-				current.Content = item.Content
-				current.Line = item.Line
-				current.Timestamp = item.Timestamp
-				current.Raw = item.Raw
-			} else if strings.TrimSpace(item.Content) != "" {
+			if isUserMessage(item) {
+				out = append(out, current)
+				current = item
+				continue
+			}
+			if strings.TrimSpace(item.Content) != "" {
 				if strings.TrimSpace(current.Content) != "" {
 					current.Content = current.Content + "\n\n" + item.Content
 				} else {
@@ -316,7 +450,6 @@ func mergeConsecutive(items []RenderItem) []RenderItem {
 		}
 		out = append(out, current)
 		current = item
-		inUserGroup = isUserMessage(current)
 	}
 	out = append(out, current)
 	return out
@@ -324,6 +457,9 @@ func mergeConsecutive(items []RenderItem) []RenderItem {
 
 func trimUserRequest(content string) string {
 	if !trimUserRequestEnabled {
+		return content
+	}
+	if IsAutoContextUserMessage(content) {
 		return content
 	}
 	marker := "## My request for Codex:"
@@ -335,6 +471,49 @@ func trimUserRequest(content string) string {
 	return strings.TrimSpace(trimmed)
 }
 
+// IsAutoContextUserMessage reports whether the content looks like auto-injected context.
+func IsAutoContextUserMessage(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	if isAgentsInstructionsOnly(trimmed) {
+		return true
+	}
+	if isTaggedBlocksOnly(trimmed) {
+		return true
+	}
+	if isLegacyCwdOnly(trimmed) {
+		return true
+	}
+	return false
+}
+
+func maybeUpdateMetaCwd(session *Session, content string) {
+	if session == nil || session.Meta == nil || session.Meta.Cwd != "" {
+		return
+	}
+	if cwd := extractCwdFromText(content); cwd != "" {
+		session.Meta.Cwd = cwd
+	}
+}
+
+func extractCwdFromText(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "Current working directory:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "Current working directory:"))
+		}
+		if strings.HasPrefix(line, "CWD:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "CWD:"))
+		}
+	}
+	return ""
+}
+
 var trimUserRequestEnabled = true
 
 // SetTrimUserRequestEnabled controls whether user messages are trimmed to the request marker.
@@ -344,4 +523,70 @@ func SetTrimUserRequestEnabled(enabled bool) {
 
 func isUserMessage(item RenderItem) bool {
 	return item.Subtype == "message" && item.Role == "user"
+}
+
+func isAgentsInstructionsOnly(text string) bool {
+	if !strings.HasPrefix(text, "# AGENTS.md instructions") {
+		return false
+	}
+	openIdx := strings.Index(text, "<INSTRUCTIONS>")
+	if openIdx == -1 {
+		return false
+	}
+	closeIdx := strings.Index(text, "</INSTRUCTIONS>")
+	if closeIdx == -1 {
+		return false
+	}
+	after := strings.TrimSpace(text[closeIdx+len("</INSTRUCTIONS>"):])
+	return after == ""
+}
+
+func isTaggedBlocksOnly(text string) bool {
+	remaining := text
+	for {
+		remaining = strings.TrimSpace(remaining)
+		if remaining == "" {
+			return true
+		}
+		var ok bool
+		remaining, ok = consumeTaggedBlock(remaining, "<environment_context>", "</environment_context>")
+		if ok {
+			continue
+		}
+		remaining, ok = consumeTaggedBlock(remaining, "<turn_aborted>", "</turn_aborted>")
+		if ok {
+			continue
+		}
+		return false
+	}
+}
+
+func consumeTaggedBlock(text, openTag, closeTag string) (string, bool) {
+	if !strings.HasPrefix(text, openTag) {
+		return text, false
+	}
+	closeIdx := strings.Index(text, closeTag)
+	if closeIdx == -1 {
+		return text, false
+	}
+	rest := text[closeIdx+len(closeTag):]
+	return rest, true
+}
+
+func isLegacyCwdOnly(text string) bool {
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "Current working directory:") {
+			continue
+		}
+		if strings.HasPrefix(line, "CWD:") {
+			continue
+		}
+		return false
+	}
+	return true
 }

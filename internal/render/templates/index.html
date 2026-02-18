@@ -10,7 +10,19 @@
 <body class="{{ .ThemeClass }}">
   <header>
     <p class="subtitle">Codex sessions browser</p>
-    <h1 class="page-title">Available Dates</h1>
+    <h1 class="page-title">{{ if eq .View "dir" }}Available Directories{{ else }}Available Dates{{ end }}</h1>
+    <div class="tabs">
+      <a class="tab {{ if eq .View "date" }}active{{ end }}" href="/?view=date">By date</a>
+      <a class="tab {{ if eq .View "dir" }}active{{ end }}" href="/?view=dir&heat={{ .HeatMode }}">By directory</a>
+    </div>
+    {{ if eq .View "dir" }}
+    <div class="tabs tabs-secondary">
+      <span class="tab-label">Heat</span>
+      <a class="tab {{ if eq .HeatMode "7d" }}active{{ end }}" href="/?view=dir&heat=7d">7d</a>
+      <a class="tab {{ if eq .HeatMode "today" }}active{{ end }}" href="/?view=dir&heat=today">Today</a>
+      <a class="tab {{ if eq .HeatMode "1h" }}active{{ end }}" href="/?view=dir&heat=1h">1h</a>
+    </div>
+    {{ end }}
   </header>
   <main>
     <div class="card search-card">
@@ -20,17 +32,43 @@
       <ul id="search-results" class="list search-results"></ul>
     </div>
     <div class="card">
-      {{ if .Dates }}
-      <ul class="list">
-        {{ range .Dates }}
-        <li>
-          <a href="/{{ .Path }}/">{{ .Label }}</a>
-          <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
-        </li>
+      {{ if eq .View "dir" }}
+        {{ if .Dirs }}
+        <div class="dir-filter-controls">
+          <label class="dir-filter-toggle" for="heat-only-toggle">
+            <input id="heat-only-toggle" class="dir-filter-checkbox" type="checkbox" checked>
+            <span>Only show heat-colored directories</span>
+          </label>
+        </div>
+        <p id="heat-only-empty" class="meta dir-filter-empty" hidden>No heat-colored directories for this range.</p>
+        <ul id="dir-list" class="list link-list">
+          {{ range .Dirs }}
+          <li class="dir-item" data-has-heat="{{ if .HeatColor }}true{{ else }}false{{ end }}"{{ if .HeatColor }} style="background-color: {{ .HeatColor }};"{{ end }}>
+            <a class="link-item-link" href="/dir?cwd={{ .Value | urlquery }}">
+              {{ .Label }}
+              <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+            </a>
+          </li>
+          {{ end }}
+        </ul>
+        {{ else }}
+        <p class="meta">No sessions found in {{ .SessionsDir }}</p>
         {{ end }}
-      </ul>
       {{ else }}
-      <p class="meta">No sessions found in {{ .SessionsDir }}</p>
+        {{ if .Dates }}
+        <ul class="list link-list">
+          {{ range .Dates }}
+          <li>
+            <a class="link-item-link" href="/{{ .Path }}/">
+              {{ .Label }}
+              <span class="meta">{{ .Count }} session{{ if ne .Count 1 }}s{{ end }}</span>
+            </a>
+          </li>
+          {{ end }}
+        </ul>
+        {{ else }}
+        <p class="meta">No sessions found in {{ .SessionsDir }}</p>
+        {{ end }}
       {{ end }}
     </div>
     <p class="meta">Last scan: {{ .LastScan }}</p>
@@ -107,7 +145,20 @@
 
           var meta = document.createElement("span");
           meta.className = "meta search-result-meta";
-          meta.textContent = item.date + " | Line " + item.line + (item.role ? " | " + item.role : "");
+          var parts = [];
+          if (item.timestamp) {
+            parts.push(item.timestamp);
+          } else if (item.date) {
+            parts.push(item.date);
+          }
+          if (item.cwd) {
+            parts.push(item.cwd);
+          }
+          parts.push("Line " + item.line);
+          if (item.role) {
+            parts.push(item.role);
+          }
+          meta.textContent = parts.join(" | ");
 
           li.appendChild(link);
           li.appendChild(meta);
@@ -164,6 +215,32 @@
       });
 
       clearResults("Type at least " + minChars + " characters to search.");
+    })();
+
+    (function () {
+      var toggle = document.getElementById("heat-only-toggle");
+      var list = document.getElementById("dir-list");
+      var emptyMessage = document.getElementById("heat-only-empty");
+      if (!toggle || !list) return;
+
+      function applyFilter() {
+        var items = list.querySelectorAll(".dir-item");
+        var showHeatOnly = toggle.checked;
+        var visibleCount = 0;
+        for (var i = 0; i < items.length; i++) {
+          var item = items[i];
+          var hasHeat = item.getAttribute("data-has-heat") === "true";
+          var hidden = showHeatOnly && !hasHeat;
+          item.style.display = hidden ? "none" : "";
+          if (!hidden) visibleCount++;
+        }
+        if (emptyMessage) {
+          emptyMessage.hidden = !(showHeatOnly && visibleCount === 0);
+        }
+      }
+
+      toggle.addEventListener("change", applyFilter);
+      applyFilter();
     })();
   </script>
 </body>

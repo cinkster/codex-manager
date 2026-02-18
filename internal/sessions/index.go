@@ -35,6 +35,7 @@ type SessionFile struct {
 	Path    string
 	Size    int64
 	ModTime time.Time
+	Meta    *SessionMeta
 }
 
 // Index stores a snapshot of sessions on disk.
@@ -43,12 +44,18 @@ type Index struct {
 	mu      sync.RWMutex
 	byDate  map[DateKey][]SessionFile
 	byName  map[string]SessionFile
+	byCwd   map[string][]SessionFile
 	updated time.Time
 }
 
 // NewIndex creates an empty index.
 func NewIndex(baseDir string) *Index {
-	return &Index{baseDir: baseDir, byDate: map[DateKey][]SessionFile{}, byName: map[string]SessionFile{}}
+	return &Index{
+		baseDir: baseDir,
+		byDate:  map[DateKey][]SessionFile{},
+		byName:  map[string]SessionFile{},
+		byCwd:   map[string][]SessionFile{},
+	}
 }
 
 // BaseDir returns the sessions root.
@@ -74,6 +81,7 @@ func (idx *Index) Refresh() error {
 
 	byDate := map[DateKey][]SessionFile{}
 	byName := map[string]SessionFile{}
+	byCwd := map[string][]SessionFile{}
 
 	walkErr := filepath.WalkDir(idx.baseDir, func(fullPath string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -104,16 +112,24 @@ func (idx *Index) Refresh() error {
 			return err
 		}
 
+		meta, err := ParseSessionMeta(fullPath)
+		if err != nil {
+			meta = nil
+		}
+
 		file := SessionFile{
 			Date:    date,
 			Name:    parts[3],
 			Path:    fullPath,
 			Size:    info.Size(),
 			ModTime: info.ModTime(),
+			Meta:    meta,
 		}
 
 		byDate[date] = append(byDate[date], file)
 		byName[path.Join(date.Path(), file.Name)] = file
+		cwd := CwdForFile(file)
+		byCwd[cwd] = append(byCwd[cwd], file)
 		return nil
 	})
 
@@ -134,6 +150,7 @@ func (idx *Index) Refresh() error {
 	idx.mu.Lock()
 	idx.byDate = byDate
 	idx.byName = byName
+	idx.byCwd = byCwd
 	idx.updated = time.Now()
 	idx.mu.Unlock()
 	return nil
@@ -162,6 +179,49 @@ func (idx *Index) SessionsByDate(date DateKey) []SessionFile {
 	out := make([]SessionFile, len(files))
 	copy(out, files)
 	return out
+}
+
+// Cwds returns sorted working directory keys.
+func (idx *Index) Cwds() []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	keys := make([]string, 0, len(idx.byCwd))
+	for key := range idx.byCwd {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i] == UnknownCwd {
+			return false
+		}
+		if keys[j] == UnknownCwd {
+			return true
+		}
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+// SessionsByCwd returns sessions for a working directory.
+func (idx *Index) SessionsByCwd(cwd string) []SessionFile {
+	key := NormalizeCwd(cwd)
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	files := idx.byCwd[key]
+	out := make([]SessionFile, len(files))
+	copy(out, files)
+	return out
+}
+
+// CwdCounts returns session counts per working directory.
+func (idx *Index) CwdCounts() map[string]int {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	counts := make(map[string]int, len(idx.byCwd))
+	for key, files := range idx.byCwd {
+		counts[key] = len(files)
+	}
+	return counts
 }
 
 // Lookup returns the file for a date+name.

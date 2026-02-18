@@ -16,6 +16,7 @@ type Config struct {
 	ShareAddr      string
 	UseTailscale   bool
 	NoTrimRequest  bool
+	OpenBrowser    bool
 	RescanInterval time.Duration
 	ShareDir       string
 	Theme          int
@@ -31,6 +32,7 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&cfg.ShareAddr, "share-addr", ":8081", "HTTP listen address for share server")
 	fs.BoolVar(&cfg.UseTailscale, "ts", false, "Use tailscale serve/funnel for share links")
 	fs.BoolVar(&cfg.NoTrimRequest, "full", false, "Do not trim user messages to the request marker")
+	fs.BoolVar(&cfg.OpenBrowser, "open-browser", false, "Open the UI in a browser on startup")
 	fs.DurationVar(&cfg.RescanInterval, "rescan-interval", 2*time.Minute, "How often to rescan sessions directory")
 	fs.StringVar(&cfg.ShareDir, "share-dir", "~/.codex/shares", "Directory to store shared HTML files")
 	fs.IntVar(&cfg.Theme, "theme", 3, "Theme palette (1-6): 1=noir-blue, 2=espresso-amber, 3=graphite-teal (default), 4=obsidian-lime, 5=ink-rose, 6=iron-cyan")
