@@ -435,7 +435,6 @@ func mergeConsecutive(items []RenderItem) []RenderItem {
 		item := items[i]
 		if current.Type == item.Type && current.Subtype == item.Subtype && current.Role == item.Role {
 			if isUserMessage(item) {
-				out = append(out, current)
 				current = item
 				continue
 			}

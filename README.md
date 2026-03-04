@@ -12,6 +12,9 @@ Browse and render Codex session `.jsonl` files with a web UI, and optionally sha
 - User messages can be trimmed to content after `## My request for Codex:` (default on).
 - Share button saves a hard‑to‑guess HTML file to `~/.codex/shares` and copies its URL.
 - Separate share server serves only exact filenames (no directory listing).
+- Native htmlbucket sharing support.
+- htmlbucket is auto-enabled when `~/.hb/auth.json` exists and is valid.
+- `-hb` bootstraps htmlbucket auth by prompting for an API key if auth is missing.
 - Optional Tailscale `serve`/`funnel` integration for public share URLs.
 
 ## Install Go
@@ -45,6 +48,9 @@ go run ./cmd/codex-manager --open-browser
 
 # Enable Tailscale serve/funnel for share URLs
  go run ./cmd/codex-manager -ts
+
+# Force htmlbucket setup on startup (prompts for API key if needed)
+ go run ./cmd/codex-manager -hb
 ```
 
 Visit:
@@ -96,9 +102,26 @@ systemctl --user restart codex-manager
 - `--share-dir` (default `~/.codex/shares`)
 - `--rescan-interval` (default `2m`)
 - `--open-browser` open the UI in your browser on startup
+- `-hb` enable htmlbucket sharing (and prompt/write `~/.hb/auth.json` if missing)
 - `-ts` enable Tailscale serve/funnel
 - `-full` disable trimming to `## My request for Codex:`
 - `-h` / `--help`
+
+## HTMLBucket notes
+- Auth file path: `~/.hb/auth.json`
+- Auth file format:
+  ```json
+  {
+    "api_key": "THE_API_KEY_HERE"
+  }
+  ```
+- If `~/.hb/auth.json` exists and is valid, htmlbucket is used for Share by default.
+- If `-hb` is used and auth file is missing, Codex Manager prompts once for an API key and writes:
+  - `~/.hb` with mode `0700`
+  - `~/.hb/auth.json` with mode `0600`
+- If auth file exists but is invalid/unreadable, startup fails with a configuration error.
+- htmlbucket share uploads call `POST https://api.htmlbucket.com/v1/upload` and return the upstream URL.
+- If htmlbucket is active and upload fails, Share returns an error (no silent fallback to local file shares).
 
 ## Tailscale notes
 When `-ts` is enabled, Codex Manager:
@@ -112,7 +135,8 @@ The binary is auto-detected at:
 
 ## Share behavior
 Clicking “Share”:
-- Renders the current session to a UUID-like filename: `~/.codex/shares/<uuid>.html`
+- If htmlbucket is active: uploads rendered HTML and copies the returned `https://<id>.htmlbucket.com` URL.
+- Otherwise: renders to a UUID-like filename at `~/.codex/shares/<uuid>.html`.
 - Copies the share URL to your clipboard
 - Displays a banner showing the copied URL
 

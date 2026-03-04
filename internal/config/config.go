@@ -15,6 +15,7 @@ type Config struct {
 	Addr           string
 	ShareAddr      string
 	UseTailscale   bool
+	UseHTMLBucket  bool
 	NoTrimRequest  bool
 	OpenBrowser    bool
 	RescanInterval time.Duration
@@ -31,6 +32,7 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&cfg.Addr, "addr", ":8080", "HTTP listen address")
 	fs.StringVar(&cfg.ShareAddr, "share-addr", ":8081", "HTTP listen address for share server")
 	fs.BoolVar(&cfg.UseTailscale, "ts", false, "Use tailscale serve/funnel for share links")
+	fs.BoolVar(&cfg.UseHTMLBucket, "hb", false, "Use htmlbucket share backend")
 	fs.BoolVar(&cfg.NoTrimRequest, "full", false, "Do not trim user messages to the request marker")
 	fs.BoolVar(&cfg.OpenBrowser, "open-browser", false, "Open the UI in a browser on startup")
 	fs.DurationVar(&cfg.RescanInterval, "rescan-interval", 2*time.Minute, "How often to rescan sessions directory")

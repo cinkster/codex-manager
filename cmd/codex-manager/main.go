@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"codex-manager/internal/config"
+	"codex-manager/internal/htmlbucket"
 	"codex-manager/internal/render"
 	"codex-manager/internal/search"
 	"codex-manager/internal/sessions"
@@ -29,6 +31,11 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 	sessions.SetTrimUserRequestEnabled(!cfg.NoTrimRequest)
+
+	htmlBucketClient, htmlBucketAuthPath, err := setupHTMLBucket(cfg, os.Stdin, os.Stdout)
+	if err != nil {
+		log.Fatalf("htmlbucket setup error: %v", err)
+	}
 
 	idx := sessions.NewIndex(cfg.SessionsDir)
 	if err := idx.Refresh(); err != nil {
@@ -60,6 +67,12 @@ func main() {
 	}
 
 	server := web.NewServer(idx, searchIdx, renderer, cfg.SessionsDir, cfg.ShareDir, cfg.ShareAddr, cfg.Theme)
+	if htmlBucketClient != nil {
+		server.EnableHTMLBucket(htmlBucketClient)
+		log.Printf("Using htmlbucket share backend (%s)", htmlBucketAuthPath)
+	} else {
+		log.Printf("Using local share backend (%s)", cfg.ShareDir)
+	}
 	shareServer := web.NewShareServer(cfg.ShareDir)
 
 	log.Printf("Codex sessions server listening on %s", cfg.Addr)
@@ -91,6 +104,41 @@ func main() {
 	}
 	if err := http.ListenAndServe(cfg.Addr, server); err != nil {
 		log.Fatalf("server error: %v", err)
+	}
+}
+
+func setupHTMLBucket(cfg config.Config, stdin io.Reader, stdout io.Writer) (*htmlbucket.Client, string, error) {
+	authPath, err := htmlbucket.DefaultAuthPath()
+	if err != nil {
+		return nil, "", err
+	}
+
+	_, err = os.Stat(authPath)
+	switch {
+	case err == nil:
+		auth, err := htmlbucket.LoadAuth(authPath)
+		if err != nil {
+			return nil, authPath, fmt.Errorf("invalid auth file %s: %w", authPath, err)
+		}
+		return htmlbucket.NewClient(auth.APIKey), authPath, nil
+	case errors.Is(err, os.ErrNotExist):
+		if !cfg.UseHTMLBucket {
+			return nil, authPath, nil
+		}
+		apiKey, err := htmlbucket.PromptAPIKey(stdin, stdout)
+		if err != nil {
+			return nil, authPath, fmt.Errorf("failed to read API key: %w", err)
+		}
+		if err := htmlbucket.WriteAuth(authPath, apiKey); err != nil {
+			return nil, authPath, fmt.Errorf("failed to write auth file %s: %w", authPath, err)
+		}
+		auth, err := htmlbucket.LoadAuth(authPath)
+		if err != nil {
+			return nil, authPath, fmt.Errorf("invalid auth file %s: %w", authPath, err)
+		}
+		return htmlbucket.NewClient(auth.APIKey), authPath, nil
+	default:
+		return nil, authPath, fmt.Errorf("failed to stat auth file %s: %w", authPath, err)
 	}
 }
 

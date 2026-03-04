@@ -5,6 +5,7 @@
 - It runs two HTTP servers:
   - Main UI server (default `:8080`)
   - Share server (default `:8081`) that serves generated static HTML share files
+- It can also publish shares to htmlbucket (`https://api.htmlbucket.com/v1/upload`).
 - Primary source data is `~/.codex/sessions/{YYYY}/{MM}/{DD}/*.jsonl`.
 - Shares are written to `~/.codex/shares` by default.
 
@@ -13,7 +14,8 @@
 2. Builds `sessions.Index` from disk and refreshes it periodically (`--rescan-interval`, default `2m`).
 3. Builds/refreshes `search.Index` from the sessions index.
 4. Creates renderer (`internal/render`) and HTTP handlers (`internal/web`).
-5. Optionally configures Tailscale share host when `-ts` is enabled.
+5. Resolves htmlbucket auth (`~/.hb/auth.json`) and enables htmlbucket backend when configured.
+6. Optionally configures Tailscale share host when `-ts` is enabled.
 
 ## Key packages
 - `internal/config`
@@ -27,9 +29,13 @@
 - `internal/search`
   - Incremental-ish rebuild: reuses unchanged files by `(size, modTime)`.
   - Searches parsed content, case-insensitive, returns preview snippets + line numbers.
+- `internal/htmlbucket`
+  - Loads/writes auth file (`api_key`) and startup prompt helper.
+  - Client for htmlbucket upload API.
 - `internal/web`
   - All main routes and view models (`server.go`).
-  - Share-only static file server with strict filename checks (`share.go`).
+  - Share endpoint can target local file shares or htmlbucket.
+  - Share-only static file server with strict filename checks (`share.go`) for local share mode.
   - Tailscale integration (`tailscale.go`).
 - `internal/render`
   - Embedded Go templates (`templates/*.html`) and shared CSS in `style.html`.
@@ -42,6 +48,7 @@
 - `GET /{yyyy}/{mm}/{dd}/` day page
 - `GET /{yyyy}/{mm}/{dd}/{file}` session page
 - `POST /share/{yyyy}/{mm}/{dd}/{file}` render and persist share HTML, return JSON `{url}`
+  - If htmlbucket backend is active, `/share` uploads to htmlbucket and returns upstream URL.
 
 ## Parsing/rendering behavior to preserve
 - The UI only shows user/assistant message content and reasoning summaries.
@@ -73,15 +80,19 @@
   - `--share-dir`
   - `--rescan-interval`
   - `--theme`
-  - `-ts` (Tailscale), `-full` (disable user prompt trimming)
+  - `-hb` (htmlbucket bootstrap), `-ts` (Tailscale), `-full` (disable user prompt trimming)
 
 ## Test coverage hotspots
+- `internal/htmlbucket/*_test.go`
+  - Auth file parse/write/prompt and upload API client behavior
 - `internal/sessions/parser_test.go`
   - Metadata extraction, request trimming, direct-format parsing, user-message merge behavior
 - `internal/sessions/index_test.go`
   - Date indexing and lookup
 - `internal/search/index_test.go`
   - Search correctness across file updates
+- `internal/web/server_share_test.go`
+  - Local share path vs htmlbucket success/failure behavior
 
 When changing parsing/indexing/search semantics, update or extend these tests first.
 
@@ -89,6 +100,8 @@ When changing parsing/indexing/search semantics, update or extend these tests fi
 - Share filenames are random-token UUID-like strings ending with `.html`.
 - Share server serves only exact filenames (no directory traversal, no listing).
 - Raw and session routes validate date path segments and reject unsafe filenames.
+- htmlbucket auth file must be valid JSON with non-empty `api_key`; invalid auth fails startup.
+- `-hb` with missing auth prompts once, writes `~/.hb` (`0700`) and `auth.json` (`0600`).
 
 ## Current repo state assumptions
 - `scripts/` and `service/` directories are present but currently contain no files.
