@@ -122,11 +122,27 @@ type dirView struct {
 }
 
 type sessionView struct {
-	Name          string
-	Size          string
-	ModTime       string
-	ResumeCommand string
-	Cwd           string
+	Name                 string
+	Size                 string
+	ModTime              string
+	ModTimeOnly          string
+	ResumeCommand        string
+	Cwd                  string
+	DateLabel            string
+	DatePath             string
+	LastUserSnippet      string
+	LastAssistantSnippet string
+}
+
+type sessionNavLink struct {
+	Path  string
+	Title string
+}
+
+type sessionNavView struct {
+	CwdLabel string
+	Prev     *sessionNavLink
+	Next     *sessionNavLink
 }
 
 type indexView struct {
@@ -145,6 +161,16 @@ type dayView struct {
 	Dirs             []dirView
 	SelectedCwd      string
 	SelectedCwdLabel string
+	FallbackDate     *dateView
+	FallbackSessions []sessionView
+	FallbackDirs     []dirView
+	Page             int
+	TotalPages       int
+	HasPrev          bool
+	HasNext          bool
+	PrevPage         int
+	NextPage         int
+	ShowAll          bool
 	View             string
 	ThemeClass       string
 }
@@ -152,6 +178,14 @@ type dayView struct {
 type dirPageView struct {
 	Dir        dirView
 	Dates      []dateView
+	Sessions   []sessionView
+	Page       int
+	TotalPages int
+	HasPrev    bool
+	HasNext    bool
+	PrevPage   int
+	NextPage   int
+	ShowAll    bool
 	ThemeClass string
 }
 
@@ -165,20 +199,25 @@ type sessionPageView struct {
 	ThemeClass    string
 	IsJSONL       bool
 	LastUserLine  int
+	LastAgentLine int
+	LastItemLine  int
+	CwdNav        *sessionNavView
 }
 
 type itemView struct {
-	Line      int
-	Timestamp string
-	Type      string
-	Subtype   string
-	Role      string
-	Title     string
-	Content   string
-	Class     string
-	AutoCtx   bool
-	Markdown  string
-	HTML      template.HTML
+	Line               int
+	Timestamp          string
+	Type               string
+	Subtype            string
+	Role               string
+	Title              string
+	Content            string
+	Class              string
+	AutoCtx            bool
+	IsTurnAborted      bool
+	TurnAbortedMessage string
+	Markdown           string
+	HTML               template.HTML
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +250,20 @@ func (s *Server) handleDir(w http.ResponseWriter, r *http.Request) {
 	for _, file := range files {
 		counts[file.Date]++
 	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].ModTime.Equal(files[j].ModTime) {
+			dateI := files[i].Date.String()
+			dateJ := files[j].Date.String()
+			if dateI != dateJ {
+				return dateI > dateJ
+			}
+			return files[i].Name > files[j].Name
+		}
+		return files[i].ModTime.After(files[j].ModTime)
+	})
+	page := parsePageParam(r)
+	showAll := parseBoolParam(r, "all")
+	sessionsView, pager := buildSessionViewsPage(files, page, 10, showAll)
 
 	dates := s.idx.Dates()
 	dateViews := make([]dateView, 0, len(counts))
@@ -233,6 +286,14 @@ func (s *Server) handleDir(w http.ResponseWriter, r *http.Request) {
 	view := dirPageView{
 		Dir:        dir,
 		Dates:      dateViews,
+		Sessions:   sessionsView,
+		Page:       pager.Page,
+		TotalPages: pager.TotalPages,
+		HasPrev:    pager.HasPrev,
+		HasNext:    pager.HasNext,
+		PrevPage:   pager.PrevPage,
+		NextPage:   pager.NextPage,
+		ShowAll:    showAll,
 		ThemeClass: s.themeClass,
 	}
 
@@ -252,33 +313,37 @@ func (s *Server) handleDay(w http.ResponseWriter, r *http.Request, parts []strin
 		viewMode = "sessions"
 	}
 
-	files := s.idx.SessionsByDate(date)
-	dirViews := buildDirViewsFromFiles(files)
-
-	filtered := files
-	if selectedCwd != "" {
-		filtered = make([]sessions.SessionFile, 0, len(files))
-		for _, file := range files {
-			if sessions.CwdForFile(file) == selectedCwd {
-				filtered = append(filtered, file)
+	requestedFiles := s.idx.SessionsByDate(date)
+	filtered := filterSessionFilesByCwd(requestedFiles, selectedCwd)
+	requestedViews := []sessionView{}
+	dirViews := buildDirViewsFromFiles(requestedFiles)
+	page := parsePageParam(r)
+	showAll := parseBoolParam(r, "all")
+	pager := paginationInfo{Page: page}
+	var fallbackDate *dateView
+	var fallbackSessions []sessionView
+	var fallbackDirs []dirView
+	if selectedCwd != "" && len(filtered) == 0 {
+		if prevDate, ok := previousDateKey(date); ok {
+			prevFiles := s.idx.SessionsByDate(prevDate)
+			prevFiltered := filterSessionFilesByCwd(prevFiles, selectedCwd)
+			if len(prevFiltered) > 0 {
+				fallbackDate = &dateView{
+					Label: prevDate.String(),
+					Path:  prevDate.Path(),
+					Count: len(prevFiles),
+				}
+				pageSessions, pageInfo := buildSessionViewsPage(prevFiltered, page, 10, showAll)
+				pager = pageInfo
+				fallbackSessions = pageSessions
+				fallbackDirs = buildDirViewsFromFiles(prevFiles)
 			}
 		}
 	}
-
-	views := make([]sessionView, 0, len(filtered))
-	for _, file := range filtered {
-		resumeCommand := buildResumeCommand(file.Meta)
-		cwd := sessions.CwdForFile(file)
-		if cwd == sessions.UnknownCwd {
-			cwd = ""
-		}
-		views = append(views, sessionView{
-			Name:          file.Name,
-			Size:          formatBytes(file.Size),
-			ModTime:       formatTime(file.ModTime),
-			ResumeCommand: resumeCommand,
-			Cwd:           cwd,
-		})
+	if fallbackDate == nil {
+		pageSessions, pageInfo := buildSessionViewsPage(filtered, page, 10, showAll)
+		pager = pageInfo
+		requestedViews = pageSessions
 	}
 
 	selectedLabel := ""
@@ -290,12 +355,22 @@ func (s *Server) handleDay(w http.ResponseWriter, r *http.Request, parts []strin
 		Date: dateView{
 			Label: date.String(),
 			Path:  date.Path(),
-			Count: len(files),
+			Count: len(requestedFiles),
 		},
-		Sessions:         views,
+		Sessions:         requestedViews,
 		Dirs:             dirViews,
 		SelectedCwd:      selectedCwd,
 		SelectedCwdLabel: selectedLabel,
+		FallbackDate:     fallbackDate,
+		FallbackSessions: fallbackSessions,
+		FallbackDirs:     fallbackDirs,
+		Page:             pager.Page,
+		TotalPages:       pager.TotalPages,
+		HasPrev:          pager.HasPrev,
+		HasNext:          pager.HasNext,
+		PrevPage:         pager.PrevPage,
+		NextPage:         pager.NextPage,
+		ShowAll:          showAll,
 		View:             viewMode,
 		ThemeClass:       s.themeClass,
 	}
@@ -331,6 +406,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	cwdFilter := normalizeSearchCwdFilter(r.URL.Query().Get("cwd"))
 	limit := 50
 	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
 		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
@@ -343,7 +419,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	var results []search.Result
 	if len(query) >= 2 {
-		results = s.search.Search(query, limit)
+		results = s.search.SearchWithCwd(query, limit, cwdFilter)
 	} else {
 		results = []search.Result{}
 	}
@@ -459,11 +535,99 @@ func formatTime(t time.Time) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
+func formatTimeOnly(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("15:04:05")
+}
+
 func formatScanTime(t time.Time) string {
 	if t.IsZero() {
 		return "never"
 	}
 	return t.Format(time.RFC3339)
+}
+
+type paginationInfo struct {
+	Page       int
+	TotalPages int
+	HasPrev    bool
+	HasNext    bool
+	PrevPage   int
+	NextPage   int
+}
+
+func parsePageParam(r *http.Request) int {
+	page := 1
+	if rawPage := r.URL.Query().Get("page"); rawPage != "" {
+		if parsed, err := strconv.Atoi(rawPage); err == nil {
+			page = parsed
+		}
+	}
+	if page < 1 {
+		page = 1
+	}
+	return page
+}
+
+func parseBoolParam(r *http.Request, key string) bool {
+	value := strings.TrimSpace(strings.ToLower(r.URL.Query().Get(key)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func paginateSessionFiles(files []sessions.SessionFile, page int, perPage int) ([]sessions.SessionFile, paginationInfo) {
+	info := paginationInfo{Page: page}
+	total := len(files)
+	if perPage <= 0 {
+		info.TotalPages = 1
+		info.HasPrev = false
+		info.HasNext = false
+		info.PrevPage = 1
+		info.NextPage = 1
+		return files, info
+	}
+	if total == 0 {
+		info.Page = 1
+		info.TotalPages = 0
+		info.PrevPage = 1
+		info.NextPage = 1
+		return nil, info
+	}
+	totalPages := (total + perPage - 1) / perPage
+	if page > totalPages {
+		page = totalPages
+	}
+	if page < 1 {
+		page = 1
+	}
+	start := (page - 1) * perPage
+	end := start + perPage
+	if start < 0 {
+		start = 0
+	}
+	if end > total {
+		end = total
+	}
+	pageFiles := files[start:end]
+	info.Page = page
+	info.TotalPages = totalPages
+	info.HasPrev = page > 1
+	info.HasNext = page < totalPages
+	info.PrevPage = 1
+	info.NextPage = totalPages
+	if info.HasPrev {
+		info.PrevPage = page - 1
+	}
+	if info.HasNext {
+		info.NextPage = page + 1
+	}
+	return pageFiles, info
 }
 
 func (s *Server) buildIndexView(view string, heatMode string) indexView {
@@ -512,6 +676,169 @@ func (s *Server) buildIndexView(view string, heatMode string) indexView {
 	}
 }
 
+func filterSessionFilesByCwd(files []sessions.SessionFile, cwd string) []sessions.SessionFile {
+	if cwd == "" {
+		return files
+	}
+	filtered := make([]sessions.SessionFile, 0, len(files))
+	for _, file := range files {
+		if sessions.CwdForFile(file) == cwd {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
+}
+
+func buildSessionViews(files []sessions.SessionFile) []sessionView {
+	views := make([]sessionView, 0, len(files))
+	for _, file := range files {
+		views = append(views, buildSessionView(file))
+	}
+	return views
+}
+
+func buildSessionView(file sessions.SessionFile) sessionView {
+	resumeCommand := buildResumeCommand(file.Meta)
+	cwd := sessions.CwdForFile(file)
+	if cwd == sessions.UnknownCwd {
+		cwd = ""
+	}
+	return sessionView{
+		Name:          file.Name,
+		Size:          formatBytes(file.Size),
+		ModTime:       formatTime(file.ModTime),
+		ResumeCommand: resumeCommand,
+		Cwd:           cwd,
+		DateLabel:     file.Date.String(),
+		DatePath:      file.Date.Path(),
+	}
+}
+
+func buildSessionViewsWithSnippets(files []sessions.SessionFile) []sessionView {
+	views := buildSessionViews(files)
+	for i, file := range files {
+		userSnippet, assistantSnippet, hasUser := extractLastSnippets(file)
+		if hasUser && userSnippet == "" {
+			userSnippet = "(empty)"
+		}
+		views[i].LastUserSnippet = userSnippet
+		views[i].LastAssistantSnippet = assistantSnippet
+	}
+	return views
+}
+
+func buildSessionViewsPage(files []sessions.SessionFile, page int, perPage int, includeAll bool) ([]sessionView, paginationInfo) {
+	if includeAll {
+		pageFiles, pager := paginateSessionFiles(files, page, perPage)
+		return buildSessionViewsWithSnippets(pageFiles), pager
+	}
+	return buildSessionViewsPageFiltered(files, page, perPage)
+}
+
+func buildSessionViewsPageFiltered(files []sessions.SessionFile, page int, perPage int) ([]sessionView, paginationInfo) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = 10
+	}
+	start := (page - 1) * perPage
+	end := start + perPage
+	total := 0
+	foundNext := false
+	scannedAll := true
+	views := make([]sessionView, 0, perPage)
+	for _, file := range files {
+		userSnippet, assistantSnippet, hasUser := extractLastSnippets(file)
+		if !hasUser {
+			continue
+		}
+		if total >= start && total < end {
+			view := buildSessionView(file)
+			if userSnippet == "" {
+				userSnippet = "(empty)"
+			}
+			view.LastUserSnippet = userSnippet
+			view.LastAssistantSnippet = assistantSnippet
+			views = append(views, view)
+		}
+		if total >= end {
+			foundNext = true
+			scannedAll = false
+			break
+		}
+		total++
+	}
+	totalPages := 0
+	if scannedAll && total > 0 {
+		totalPages = (total + perPage - 1) / perPage
+		if page > totalPages {
+			return buildSessionViewsPageFiltered(files, totalPages, perPage)
+		}
+	}
+	info := paginationInfo{
+		Page:       page,
+		TotalPages: totalPages,
+		HasPrev:    page > 1 && total > start,
+		HasNext:    foundNext || (totalPages > 0 && page < totalPages),
+		PrevPage:   1,
+		NextPage:   totalPages,
+	}
+	if info.HasPrev {
+		info.PrevPage = page - 1
+	}
+	if info.HasNext {
+		info.NextPage = page + 1
+	} else if totalPages > 0 {
+		info.NextPage = totalPages
+	}
+	return views, info
+}
+
+func extractLastSnippets(file sessions.SessionFile) (string, string, bool) {
+	session, err := sessions.ParseSession(file.Path)
+	if err != nil {
+		return "", "", false
+	}
+	lastUser := ""
+	lastAssistant := ""
+	hasUser := false
+	for _, item := range session.Items {
+		switch item.Role {
+		case "user":
+			if sessions.IsAutoContextUserMessage(item.Content) {
+				continue
+			}
+			hasUser = true
+			lastUser = item.Content
+		case "assistant":
+			lastAssistant = item.Content
+		}
+	}
+	userSnippet := snippetFromContent(lastUser, 180)
+	assistantSnippet := snippetFromContent(lastAssistant, 180)
+	return userSnippet, assistantSnippet, hasUser
+}
+
+func snippetFromContent(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.Join(strings.Fields(value), " ")
+	if max <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	if max > 3 {
+		return string(runes[:max-3]) + "..."
+	}
+	return string(runes[:max])
+}
+
 func buildDirViewsFromFiles(files []sessions.SessionFile) []dirView {
 	counts := make(map[string]int, len(files))
 	for _, file := range files {
@@ -550,6 +877,31 @@ func buildDirViewsFromCounts(counts map[string]int, recentCounts map[string]int,
 		views = append(views, view)
 	}
 	return views
+}
+
+func previousDateKey(date sessions.DateKey) (sessions.DateKey, bool) {
+	year, err := strconv.Atoi(date.Year)
+	if err != nil {
+		return sessions.DateKey{}, false
+	}
+	month, err := strconv.Atoi(date.Month)
+	if err != nil {
+		return sessions.DateKey{}, false
+	}
+	day, err := strconv.Atoi(date.Day)
+	if err != nil {
+		return sessions.DateKey{}, false
+	}
+	current := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.Local)
+	if current.Year() != year || int(current.Month()) != month || current.Day() != day {
+		return sessions.DateKey{}, false
+	}
+	prev := current.AddDate(0, 0, -1)
+	return sessions.DateKey{
+		Year:  fmt.Sprintf("%04d", prev.Year()),
+		Month: fmt.Sprintf("%02d", int(prev.Month())),
+		Day:   fmt.Sprintf("%02d", prev.Day()),
+	}, true
 }
 
 func dirLabel(cwd string) string {
@@ -655,6 +1007,20 @@ func normalizeCwdParam(value string) string {
 	return value
 }
 
+func normalizeSearchCwdFilter(value string) string {
+	value = normalizeCwdParam(value)
+	if value == "" {
+		return ""
+	}
+	if value != "/" && strings.HasSuffix(value, "/") {
+		value = strings.TrimRight(value, "/")
+	}
+	if value != "\\" && strings.HasSuffix(value, "\\") {
+		value = strings.TrimRight(value, "\\")
+	}
+	return value
+}
+
 func buildResumeCommand(meta *sessions.SessionMeta) string {
 	if meta == nil || meta.ID == "" {
 		return ""
@@ -695,10 +1061,19 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 	items := make([]itemView, 0, len(session.Items))
 	lastUserLine := 0
 	lastAnyUserLine := 0
+	lastAgentLine := 0
+	lastItemLine := 0
 	for _, item := range session.Items {
 		autoCtx := item.Role == "user" && sessions.IsAutoContextUserMessage(item.Content)
-		renderText := item.Content
+		turnAbortedMessage, isTurnAborted := "", false
 		if autoCtx {
+			if msg, ok := sessions.ExtractTurnAbortedMessage(item.Content); ok {
+				turnAbortedMessage = msg
+				isTurnAborted = true
+			}
+		}
+		renderText := item.Content
+		if autoCtx && !isTurnAborted {
 			renderText = escapeAutoContextTags(renderText)
 		}
 		view := itemView{
@@ -717,17 +1092,27 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 			view.AutoCtx = true
 			view.Class = strings.TrimSpace(view.Class + " auto-context")
 		}
+		if isTurnAborted {
+			view.IsTurnAborted = true
+			view.TurnAbortedMessage = turnAbortedMessage
+		}
 		if item.Role == "user" {
 			lastAnyUserLine = item.Line
 			if !autoCtx {
 				lastUserLine = item.Line
 			}
 		}
+		if item.Role == "assistant" {
+			lastAgentLine = item.Line
+		}
+		lastItemLine = item.Line
 		items = append(items, view)
 	}
 	if lastUserLine == 0 {
 		lastUserLine = lastAnyUserLine
 	}
+
+	cwdNav := buildSessionNav(s.idx, file)
 
 	view := sessionPageView{
 		Date: dateView{
@@ -736,10 +1121,13 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 			Count: 0,
 		},
 		File: sessionView{
-			Name:    file.Name,
-			Size:    formatBytes(file.Size),
-			ModTime: formatTime(file.ModTime),
-			Cwd:     displayCwd(sessions.CwdForFile(file)),
+			Name:        file.Name,
+			Size:        formatBytes(file.Size),
+			ModTime:     formatTime(file.ModTime),
+			ModTimeOnly: formatTimeOnly(file.ModTime),
+			Cwd:         displayCwd(sessions.CwdForFile(file)),
+			DateLabel:   date.String(),
+			DatePath:    date.Path(),
 		},
 		Meta:          session.Meta,
 		Items:         items,
@@ -748,8 +1136,66 @@ func (s *Server) buildSessionView(parts []string) (sessionPageView, error) {
 		ThemeClass:    s.themeClass,
 		IsJSONL:       strings.HasSuffix(strings.ToLower(file.Name), ".jsonl"),
 		LastUserLine:  lastUserLine,
+		LastAgentLine: lastAgentLine,
+		LastItemLine:  lastItemLine,
+		CwdNav:        cwdNav,
 	}
 	return view, nil
+}
+
+func buildSessionNav(idx *sessions.Index, current sessions.SessionFile) *sessionNavView {
+	cwd := sessions.CwdForFile(current)
+	if sessions.NormalizeCwd(cwd) == sessions.UnknownCwd {
+		return nil
+	}
+	files := idx.SessionsByCwd(cwd)
+	if len(files) < 2 {
+		return nil
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].ModTime.Equal(files[j].ModTime) {
+			dateI := files[i].Date.String()
+			dateJ := files[j].Date.String()
+			if dateI != dateJ {
+				return dateI < dateJ
+			}
+			return files[i].Name < files[j].Name
+		}
+		return files[i].ModTime.Before(files[j].ModTime)
+	})
+	currentIndex := -1
+	for i := range files {
+		if files[i].Path == current.Path {
+			currentIndex = i
+			break
+		}
+	}
+	if currentIndex == -1 {
+		return nil
+	}
+	nav := &sessionNavView{CwdLabel: dirLabel(cwd)}
+	if currentIndex > 0 {
+		nav.Prev = buildSessionNavLink(files[currentIndex-1])
+	}
+	if currentIndex+1 < len(files) {
+		nav.Next = buildSessionNavLink(files[currentIndex+1])
+	}
+	if nav.Prev == nil && nav.Next == nil {
+		return nil
+	}
+	return nav
+}
+
+func buildSessionNavLink(file sessions.SessionFile) *sessionNavLink {
+	title := fmt.Sprintf("%s / %s", file.Date.String(), file.Name)
+	mod := formatTime(file.ModTime)
+	if mod != "" {
+		title = title + " (" + mod + ")"
+	}
+	return &sessionNavLink{
+		Path:  "/" + file.Date.Path() + "/" + file.Name + "#last-user",
+		Title: title,
+	}
 }
 
 func themeClass(theme int) string {

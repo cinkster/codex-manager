@@ -9,13 +9,12 @@
 </head>
 <body class="{{ .ThemeClass }} has-sticky-header">
   <header class="sticky-header">
-    <p class="subtitle"><a href="/">All dates</a> / <a href="/{{ .Date.Path }}/">{{ .Date.Label }}</a></p>
-    <h1 class="page-title">{{ .File.Name }}</h1>
-    <p class="meta">{{ .File.Size }} | {{ .File.ModTime }}{{ if .File.Cwd }} | CWD: {{ .File.Cwd }}{{ if .ResumeCommand }} (<a href="#" data-copy-id="resume-cmd">Copy resume command</a>){{ end }}{{ end }}{{ if and (not .File.Cwd) .ResumeCommand }}
-      | <a href="#" data-copy-id="resume-cmd">Copy resume command</a>{{ end }} | <a href="#" data-copy-id="md-all">Copy thread as Markdown</a>
-      {{ if and .IsJSONL (gt .LastUserLine 0) }}| <a href="#line-{{ .LastUserLine }}">Jump to last user message</a> | <a id="jump-user-prev" href="#" aria-label="Previous user message" title="Previous user message">[&uarr;]</a> <a id="jump-user-next" href="#" aria-label="Next user message" title="Next user message">[&darr;]</a>{{ end }}
-      | <form class="share-form" method="post" action="/share/{{ .Date.Path }}/{{ .File.Name }}">
-        <button class="copy-btn" type="submit">Share</button>
+    <p class="subtitle"><a href="/">All dates</a> / {{ .Date.Label }}{{ if .File.ModTimeOnly }} {{ .File.ModTimeOnly }}{{ end }} ({{ .File.Size }})</p>
+    <h1 class="page-title">{{ .File.Name }}{{ if .ResumeCommand }} <span class="title-links">(<a class="title-link nav-btn" href="#" data-copy-id="resume-cmd">▶️ Copy resume command</a> | <a class="title-link nav-btn" href="#" data-copy-id="md-all">📋 Copy thread as Markdown</a>)</span>{{ end }}</h1>
+      <p class="meta">{{ if .File.Cwd }}<a class="cwd-link nav-btn" href="/dir?cwd={{ .File.Cwd | urlquery }}" title="Back to this CWD">📂</a> CWD: {{ .File.Cwd }}{{ if .CwdNav }} {{ if .CwdNav.Prev }}<a class="nav-btn" href="{{ .CwdNav.Prev.Path }}" title="{{ .CwdNav.Prev.Title }}">⬅️</a>{{ else }}<span class="nav-btn disabled">⬅️</span>{{ end }}{{ if .CwdNav.Next }}<a class="nav-btn" href="{{ .CwdNav.Next.Path }}" title="{{ .CwdNav.Next.Title }}">➡️</a>{{ else }}<span class="nav-btn disabled">➡️</span>{{ end }}{{ end }}{{ end }}
+      {{ if and .IsJSONL (gt .LastUserLine 0) }}{{ if .File.Cwd }} | {{ end }}<a class="nav-btn" href="#last-user">🚀 Jump to last user message</a> | <a class="nav-btn" id="jump-user-prev" href="#" aria-label="Previous user message" title="Previous user message">⬆️</a><a class="nav-btn" id="jump-user-next" href="#" aria-label="Next user message" title="Next user message">⬇️</a>{{ end }}
+      <form class="share-form" method="post" action="/share/{{ .Date.Path }}/{{ .File.Name }}">
+        <button class="nav-btn" type="submit">Share</button>
       </form>
     </p>
     <div id="share-banner" class="share-banner" role="status" aria-live="polite"></div>
@@ -39,7 +38,13 @@
 
     {{ if .Items }}
       {{ range .Items }}
-      <section id="line-{{ .Line }}" class="session-item {{ .Class }}">
+      <section id="line-{{ .Line }}" class="{{ if .IsTurnAborted }}turn-aborted-item{{ else }}session-item {{ .Class }}{{ end }}">
+        {{ if eq .Line $.LastUserLine }}<span id="last-user" class="session-anchor"></span>{{ end }}
+        {{ if eq .Line $.LastAgentLine }}<span id="last-agent" class="session-anchor"></span>{{ end }}
+        {{ if and (gt $.LastUserLine 0) (eq .Line $.LastUserLine) }}<span id="last-item" class="session-anchor"></span>{{ else if and (eq $.LastUserLine 0) (eq .Line $.LastItemLine) }}<span id="last-item" class="session-anchor"></span>{{ end }}
+        {{ if .IsTurnAborted }}
+        <p class="turn-aborted-text">{{ .TurnAbortedMessage }}</p>
+        {{ else }}
         <div class="session-header">
           <span class="session-title">{{ .Title }}</span>
           <span class="session-type">{{ .Type }}{{ if .Subtype }}:{{ .Subtype }}{{ end }}</span>
@@ -47,8 +52,7 @@
           {{ if .Role }}<span class="tag">{{ .Role }}</span>{{ end }}
           {{ if .AutoCtx }}<span class="tag tag-auto">Auto context</span>{{ end }}
           <span class="meta">Line {{ .Line }}</span>
-          <button class="copy-btn" type="button" data-copy-id="md-{{ .Line }}" aria-label="Copy Markdown" title="Copy Markdown">📋</button>
-          <button class="copy-btn" type="button" data-copy-link="line-{{ .Line }}" aria-label="Copy Link" title="Copy Link">🔗</button>
+          <button class="copy-btn" type="button" data-copy-id="md-{{ .Line }}" aria-label="Copy Markdown" title="Copy Markdown">📋</button><button class="copy-btn" type="button" data-copy-link="line-{{ .Line }}" aria-label="Copy Link" title="Copy Link">🔗</button>
         </div>
         {{ if eq .Subtype "reasoning" }}
         <details>
@@ -64,6 +68,7 @@
         <div class="session-content markdown">{{ .HTML }}</div>
         {{ end }}
         <textarea id="md-{{ .Line }}" class="copy-source">{{ .Markdown }}</textarea>
+        {{ end }}
       </section>
       {{ end }}
     {{ else }}
@@ -81,6 +86,26 @@
       }
       updateStickyOffset();
       window.addEventListener("resize", updateStickyOffset);
+
+      function getStickyOffset() {
+        return stickyHeader ? stickyHeader.offsetHeight : 0;
+      }
+      function getElementTop(element) {
+        var rect = element.getBoundingClientRect();
+        var scrollY = window.scrollY || window.pageYOffset || 0;
+        return rect.top + scrollY;
+      }
+      function scrollToElement(element) {
+        if (!element) return;
+        var offset = getStickyOffset() + 8;
+        var top = getElementTop(element) - offset;
+        if (top < 0) top = 0;
+        if (typeof window.scrollTo === "function") {
+          window.scrollTo({ top: top, behavior: "smooth" });
+        } else {
+          window.scrollTop = top;
+        }
+      }
 
       function copyText(text, target) {
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -173,32 +198,13 @@
         var userSections = Array.prototype.slice.call(
           document.querySelectorAll("section.session-item.role-user:not(.auto-context)")
         );
-        var getStickyOffset = function () {
-          return stickyHeader ? stickyHeader.offsetHeight : 0;
-        };
-        var getSectionTop = function (section) {
-          var rect = section.getBoundingClientRect();
-          var scrollY = window.scrollY || window.pageYOffset || 0;
-          return rect.top + scrollY;
-        };
-        var scrollToSection = function (section) {
-          if (!section) return;
-          var offset = getStickyOffset() + 8;
-          var top = getSectionTop(section) - offset;
-          if (top < 0) top = 0;
-          if (typeof window.scrollTo === "function") {
-            window.scrollTo({ top: top, behavior: "smooth" });
-          } else {
-            window.scrollTop = top;
-          }
-        };
         var findCurrentIndex = function () {
           var offset = getStickyOffset() + 8;
           var scrollY = window.scrollY || window.pageYOffset || 0;
           var position = scrollY + offset + 1;
           var current = -1;
           for (var i = 0; i < userSections.length; i++) {
-            if (getSectionTop(userSections[i]) <= position) {
+            if (getElementTop(userSections[i]) <= position) {
               current = i;
             } else {
               break;
@@ -211,18 +217,34 @@
           if (!userSections.length) return;
           var index = findCurrentIndex();
           var target = index <= 0 ? 0 : index - 1;
-          scrollToSection(userSections[target]);
+          scrollToElement(userSections[target]);
         };
         var goNext = function (event) {
           if (event) event.preventDefault();
           if (!userSections.length) return;
           var index = findCurrentIndex();
           var target = index < 0 ? 0 : Math.min(index + 1, userSections.length - 1);
-          scrollToSection(userSections[target]);
+          scrollToElement(userSections[target]);
         };
         if (jumpPrev) jumpPrev.addEventListener("click", goPrev);
         if (jumpNext) jumpNext.addEventListener("click", goNext);
       }
+
+      function handleInitialJump() {
+        var hash = window.location.hash || "";
+        if (hash.length > 1) {
+          var target = document.getElementById(hash.slice(1));
+          if (target) {
+            setTimeout(function () { scrollToElement(target); }, 0);
+            return;
+          }
+        }
+        var lastItem = document.getElementById("last-item");
+        if (lastItem) {
+          setTimeout(function () { scrollToElement(lastItem); }, 0);
+        }
+      }
+      handleInitialJump();
 
     })();
   </script>

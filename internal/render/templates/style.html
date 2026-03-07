@@ -7,8 +7,9 @@
   --muted: #8fa6a3;
   --accent: #49c1b5;
   --border: #243033;
+  --border-strong: #3b4a4f;
   --user: #15333a;
-  --assistant: #171f21;
+  --assistant: #223034;
   --tool: #1a2b27;
   --system: #1a2123;
   --error: #3a1f22;
@@ -23,8 +24,9 @@ body.theme-noir-blue {
   --muted: #9aa5b1;
   --accent: #7fb6ff;
   --border: #263243;
+  --border-strong: #3b4a60;
   --user: #1e2f4d;
-  --assistant: #1a2230;
+  --assistant: #243041;
   --tool: #1b2b2a;
   --system: #1c2330;
   --error: #3a1f25;
@@ -39,8 +41,9 @@ body.theme-espresso-amber {
   --muted: #b09b84;
   --accent: #e0a35c;
   --border: #332a21;
+  --border-strong: #4a3c2d;
   --user: #2c2318;
-  --assistant: #201b14;
+  --assistant: #2a241b;
   --tool: #2a2319;
   --system: #251f17;
   --error: #3a1f1a;
@@ -55,8 +58,9 @@ body.theme-graphite-teal {
   --muted: #8fa6a3;
   --accent: #49c1b5;
   --border: #243033;
+  --border-strong: #3b4a4f;
   --user: #15333a;
-  --assistant: #171f21;
+  --assistant: #223034;
   --tool: #1a2b27;
   --system: #1a2123;
   --error: #3a1f22;
@@ -71,8 +75,9 @@ body.theme-obsidian-lime {
   --muted: #9eb39a;
   --accent: #9ad36a;
   --border: #243228;
+  --border-strong: #3b4b3c;
   --user: #1f2f23;
-  --assistant: #18211b;
+  --assistant: #223025;
   --tool: #1d2a1f;
   --system: #1b231d;
   --error: #3b1f20;
@@ -87,8 +92,9 @@ body.theme-ink-rose {
   --muted: #b59bb0;
   --accent: #e06c9f;
   --border: #33263a;
+  --border-strong: #4a3b4f;
   --user: #2f1c2a;
-  --assistant: #211820;
+  --assistant: #2b202a;
   --tool: #2a1c27;
   --system: #241a22;
   --error: #3b1f27;
@@ -103,8 +109,9 @@ body.theme-iron-cyan {
   --muted: #9aaab5;
   --accent: #5cc7e6;
   --border: #24313a;
+  --border-strong: #3a4a56;
   --user: #1d2e3a;
-  --assistant: #181f24;
+  --assistant: #222c33;
   --tool: #1b2a2f;
   --system: #1b2226;
   --error: #3a1f23;
@@ -141,6 +148,31 @@ body.has-sticky-header main {
 header a {
   color: var(--accent);
   text-decoration: none;
+}
+.cwd-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+.nav-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.nav-btn:hover {
+  background: var(--border);
+}
+.nav-btn.disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
 }
 .tabs {
   margin-top: 10px;
@@ -189,13 +221,22 @@ main {
   font-size: 32px;
   margin: 0 0 8px;
 }
+.page-title .title-links {
+  font-size: 14px;
+  font-weight: normal;
+  margin-left: 6px;
+}
+.page-title .title-link {
+  font-size: 14px;
+  font-weight: normal;
+}
 .subtitle {
   color: var(--muted);
   margin: 0;
 }
 .card {
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 12px;
   padding: 16px 20px;
   margin: 16px 0;
@@ -262,14 +303,10 @@ main {
   margin: 0;
 }
 .list li {
-  padding: 10px 0;
   border-bottom: 1px dashed var(--border);
 }
 .list li:last-child {
   border-bottom: none;
-}
-.link-list li {
-  padding: 0;
 }
 .dir-item {
   padding: 0;
@@ -325,8 +362,81 @@ main {
   text-decoration: none;
   transition: background-color 0.15s ease;
 }
+.session-snippet {
+  margin-top: 10px;
+}
+.session-snippet-thread {
+  display: grid;
+  gap: 10px;
+}
+.snippet-divider {
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  letter-spacing: 0.2em;
+}
+.snippet-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+.snippet-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.session-snippet-thread .session-item {
+  margin-bottom: 0;
+  padding: 10px 12px;
+}
+.session-snippet-thread .session-content {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.session-list-item {
+  padding: 10px;
+  border-radius: 10px;
+  transition: box-shadow 0.15s ease;
+}
+.session-list-item.search-result {
+  border: 1px solid var(--border-strong);
+  margin: 12px 0;
+}
+.session-list-item:hover,
+.session-list-item:focus-within {
+  box-shadow: inset 0 0 0 9999px rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 14px;
+  flex-wrap: wrap;
+}
+.page-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+.filter-form {
+  margin-top: 6px;
+}
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.filter-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+.filter-label {
+  user-select: none;
+}
 .link-item-link:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: transparent;
 }
 .link-item-link:focus-visible {
   outline: 2px solid var(--accent);
@@ -344,12 +454,35 @@ main {
   color: var(--muted);
   font-size: 14px;
 }
+summary.meta {
+  cursor: pointer;
+}
 .session-item {
   padding: 16px;
   border-radius: 10px;
   margin-bottom: 16px;
   border: 1px solid var(--border);
   background: var(--panel);
+  scroll-margin-top: calc(var(--sticky-offset, 180px) + 8px);
+}
+.turn-aborted-item {
+  margin: 8px 0 16px;
+  margin-left: 33%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  scroll-margin-top: calc(var(--sticky-offset, 180px) + 8px);
+}
+.turn-aborted-text {
+  margin: 0;
+  color: #ff6b6b;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.session-anchor {
+  display: block;
+  height: 0;
+  width: 0;
   scroll-margin-top: calc(var(--sticky-offset, 180px) + 8px);
 }
 .session-item.role-user { background: var(--user); }
@@ -467,7 +600,7 @@ main {
 }
 .session-content code {
   background: var(--code);
-  padding: 2px 6px;
+  padding: 4px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
 }
@@ -481,6 +614,18 @@ main {
   padding-left: 12px;
   border-left: 3px solid var(--border);
   color: var(--muted);
+}
+.session-content table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  margin: 0 0 0.9em;
+}
+.session-content th,
+.session-content td {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
 }
 .tag {
   display: inline-block;
