@@ -59,6 +59,11 @@
           <summary class="meta">Reveal reasoning</summary>
           <div class="session-content markdown">{{ .HTML }}</div>
         </details>
+        {{ else if .AutoCtx }}
+        <details>
+          <summary class="meta">Reveal Context</summary>
+          <div class="session-content markdown">{{ .HTML }}</div>
+        </details>
         {{ else }}
         <div class="session-content markdown">{{ .HTML }}</div>
         {{ end }}
@@ -148,14 +153,42 @@
         shareForm.addEventListener("submit", function (event) {
           event.preventDefault();
           fetch(shareForm.action, { method: "POST", credentials: "same-origin" })
-            .then(function (response) { return response.json(); })
+            .then(function (response) {
+              return response.text().then(function (text) {
+                var data = null;
+                if (text) {
+                  try {
+                    data = JSON.parse(text);
+                  } catch (e) {
+                    data = null;
+                  }
+                }
+                if (!response.ok) {
+                  var errorMessage = "Share failed.";
+                  if (data && data.error) {
+                    errorMessage = data.error;
+                  } else if (response.status) {
+                    errorMessage = "Share failed (" + response.status + ").";
+                  }
+                  throw new Error(errorMessage);
+                }
+                return data;
+              });
+            })
             .then(function (data) {
-              if (!data || !data.url) return;
+              if (!data || !data.url) {
+                throw new Error("Share failed: missing URL.");
+              }
               copyText(data.url, shareForm);
               shareBanner.textContent = "Copied share URL: " + data.url;
+              shareBanner.classList.remove("error");
               shareBanner.classList.add("visible");
             })
-            .catch(function () {});
+            .catch(function (error) {
+              shareBanner.textContent = (error && error.message) ? error.message : "Share failed.";
+              shareBanner.classList.add("error");
+              shareBanner.classList.add("visible");
+            });
         });
       }
 
@@ -163,7 +196,7 @@
       var jumpNext = document.getElementById("jump-user-next");
       if (jumpPrev || jumpNext) {
         var userSections = Array.prototype.slice.call(
-          document.querySelectorAll("section.session-item.role-user")
+          document.querySelectorAll("section.session-item.role-user:not(.auto-context)")
         );
         var findCurrentIndex = function () {
           var offset = getStickyOffset() + 8;

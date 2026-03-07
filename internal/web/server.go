@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,10 @@ import (
 	"github.com/yuin/goldmark/extension"
 )
 
+type htmlBucketUploader interface {
+	Upload(ctx context.Context, html string) (string, error)
+}
+
 // Server serves the HTML views.
 type Server struct {
 	idx           *sessions.Index
@@ -39,6 +44,7 @@ type Server struct {
 	themeClass    string
 	useTailscale  bool
 	tailscaleHost string
+	htmlBucket    htmlBucketUploader
 }
 
 // NewServer wires up the HTTP server.
@@ -58,6 +64,11 @@ func NewServer(idx *sessions.Index, searchIdx *search.Index, renderer *render.Re
 func (s *Server) EnableTailscale(host string) {
 	s.useTailscale = true
 	s.tailscaleHost = strings.TrimSuffix(host, ".")
+}
+
+// EnableHTMLBucket configures htmlbucket as the active share backend.
+func (s *Server) EnableHTMLBucket(client htmlBucketUploader) {
+	s.htmlBucket = client
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -429,6 +440,23 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request, parts []str
 		return
 	}
 
+	var buf bytes.Buffer
+	if err := s.renderer.Execute(&buf, "session", view); err != nil {
+		http.Error(w, fmt.Sprintf("failed to render html: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if s.htmlBucket != nil {
+		shareURL, err := s.htmlBucket.Upload(r.Context(), buf.String())
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("htmlbucket upload failed: %v", err))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": shareURL})
+		return
+	}
+
 	if err := os.MkdirAll(s.shareDir, 0o700); err != nil {
 		http.Error(w, fmt.Sprintf("failed to create share dir: %v", err), http.StatusInternalServerError)
 		return
@@ -442,11 +470,6 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request, parts []str
 
 	fileName := formatUUID(token) + ".html"
 	targetFile := filepath.Join(s.shareDir, fileName)
-	var buf bytes.Buffer
-	if err := s.renderer.Execute(&buf, "session", view); err != nil {
-		http.Error(w, fmt.Sprintf("failed to render html: %v", err), http.StatusInternalServerError)
-		return
-	}
 	if err := os.WriteFile(targetFile, buf.Bytes(), 0o600); err != nil {
 		http.Error(w, fmt.Sprintf("failed to write share file: %v", err), http.StatusInternalServerError)
 		return
@@ -455,6 +478,12 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request, parts []str
 	shareURL := s.buildShareURL(r, fileName)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"url": shareURL})
+}
+
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request, rawPath string) {
