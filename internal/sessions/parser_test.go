@@ -80,3 +80,61 @@ func TestParseSessionDirectFormat(t *testing.T) {
 		t.Fatalf("unexpected reasoning content: %q", session.Items[2].Content)
 	}
 }
+
+func TestReclassifyToolWarning(t *testing.T) {
+	base := t.TempDir()
+	filePath := filepath.Join(base, "session.jsonl")
+	data := "" +
+		"{\"timestamp\":\"2026-01-09T01:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Warning: apply_patch was requested via exec_command. Use the apply_patch tool instead of exec_command.\"}]}}\n"
+
+	if err := os.WriteFile(filePath, []byte(data), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, err := ParseSession(filePath)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(session.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(session.Items))
+	}
+	item := session.Items[0]
+	if item.Role != "assistant" {
+		t.Fatalf("expected assistant role, got %q", item.Role)
+	}
+	if item.Class != "role-assistant" {
+		t.Fatalf("expected role-assistant class, got %q", item.Class)
+	}
+	if item.Title != "Agent" {
+		t.Fatalf("expected Agent title, got %q", item.Title)
+	}
+}
+
+func TestToolWarningWithExtraTextStaysUser(t *testing.T) {
+	base := t.TempDir()
+	filePath := filepath.Join(base, "session.jsonl")
+	data := "" +
+		"{\"timestamp\":\"2026-01-09T01:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Warning: apply_patch was requested via exec_command. Use the apply_patch tool instead of exec_command.\\n\\nExtra note\"}]}}\n"
+
+	if err := os.WriteFile(filePath, []byte(data), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, err := ParseSession(filePath)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(session.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(session.Items))
+	}
+	item := session.Items[0]
+	if item.Role != "user" {
+		t.Fatalf("expected user role, got %q", item.Role)
+	}
+	if item.Class != "role-user" {
+		t.Fatalf("expected role-user class, got %q", item.Class)
+	}
+	if item.Title != "User" {
+		t.Fatalf("expected User title, got %q", item.Title)
+	}
+}

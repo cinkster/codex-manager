@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"codex-manager/internal/sessions"
 )
@@ -60,6 +61,85 @@ func TestIndexSearch(t *testing.T) {
 	}
 	if results[0].Line != 1 {
 		t.Fatalf("expected line 1 after update, got %d", results[0].Line)
+	}
+}
+
+func TestSearchDeduplicatesConsecutiveUserAssistantHits(t *testing.T) {
+	baseDir := t.TempDir()
+	writeSessionFile(t, baseDir, "2024/01/02/consecutive.jsonl", []string{
+		`{"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"text","text":"キーワード を含む質問"}]}}`,
+		`{"timestamp":"2024-01-02T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"text","text":"キーワード を含む回答"}]}}`,
+	})
+
+	idx := sessions.NewIndex(baseDir)
+	if err := idx.Refresh(); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	searchIdx := NewIndex()
+	if err := searchIdx.RefreshFrom(idx); err != nil {
+		t.Fatalf("search refresh: %v", err)
+	}
+
+	results := searchIdx.Search("キーワード", 10)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 deduplicated result, got %d", len(results))
+	}
+	if results[0].Role != "user" {
+		t.Fatalf("expected user result to be kept, got %q", results[0].Role)
+	}
+	if results[0].Line != 1 {
+		t.Fatalf("expected user line 1, got %d", results[0].Line)
+	}
+	if results[0].NextAssistantLine != 2 {
+		t.Fatalf("expected next assistant line 2, got %d", results[0].NextAssistantLine)
+	}
+}
+
+func TestSearchKeepsAssistantOnlyHit(t *testing.T) {
+	baseDir := t.TempDir()
+	writeSessionFile(t, baseDir, "2024/01/02/assistant-only.jsonl", []string{
+		`{"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"text","text":"質問だけ"}]}}`,
+		`{"timestamp":"2024-01-02T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"text","text":"キーワード を含む回答"}]}}`,
+	})
+
+	idx := sessions.NewIndex(baseDir)
+	if err := idx.Refresh(); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	searchIdx := NewIndex()
+	if err := searchIdx.RefreshFrom(idx); err != nil {
+		t.Fatalf("search refresh: %v", err)
+	}
+
+	results := searchIdx.Search("キーワード", 10)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 assistant-only result, got %d", len(results))
+	}
+	if results[0].Role != "assistant" {
+		t.Fatalf("expected assistant result, got %q", results[0].Role)
+	}
+	if results[0].Line != 2 {
+		t.Fatalf("expected assistant line 2, got %d", results[0].Line)
+	}
+}
+
+func TestMakePreviewMultibyteBoundarySafe(t *testing.T) {
+	content := strings.Repeat("あ", 120) + "キーワード" + strings.Repeat("い", 120)
+	preview := makePreview(content, "キーワード")
+
+	if preview == "" {
+		t.Fatalf("expected preview, got empty")
+	}
+	if !utf8.ValidString(preview) {
+		t.Fatalf("expected valid UTF-8 preview, got %q", preview)
+	}
+	if strings.ContainsRune(preview, '\uFFFD') {
+		t.Fatalf("expected preview without replacement rune, got %q", preview)
+	}
+	if !strings.Contains(preview, "キーワード") {
+		t.Fatalf("expected preview to contain query, got %q", preview)
 	}
 }
 

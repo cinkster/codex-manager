@@ -180,6 +180,11 @@ func parseResponseItem(env envelope, lineText string, lineNum int, session *Sess
 			item.Content = prettyJSON(string(env.Payload))
 		}
 		item.Class = roleClass(payload.Role)
+		if payload.Role == "user" && isToolWarningUserMessage(item.Content) {
+			item.Role = "assistant"
+			item.Title = "Agent"
+			item.Class = roleClass("assistant")
+		}
 	case "reasoning":
 		item.Role = "assistant"
 		item.Class = roleClass("assistant")
@@ -222,6 +227,11 @@ func parseDirectMessage(lineText string, lineNum int, session *Session) *RenderI
 		item.Content = prettyJSON(lineText)
 	}
 	item.Class = roleClass(payload.Role)
+	if payload.Role == "user" && isToolWarningUserMessage(item.Content) {
+		item.Role = "assistant"
+		item.Title = "Agent"
+		item.Class = roleClass("assistant")
+	}
 	return &item
 }
 
@@ -586,6 +596,35 @@ func isLegacyCwdOnly(text string) bool {
 		if strings.HasPrefix(line, "CWD:") {
 			continue
 		}
+		return false
+	}
+	return true
+}
+
+func isToolWarningUserMessage(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	lines := strings.Split(trimmed, "\n")
+	nonEmpty := 0
+	lastNonEmpty := ""
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		nonEmpty++
+		lastNonEmpty = line
+		if nonEmpty > 1 {
+			return false
+		}
+	}
+	trimmed = lastNonEmpty
+	if !strings.HasPrefix(trimmed, "Warning: apply_patch was requested via ") {
+		return false
+	}
+	if !strings.HasSuffix(trimmed, "Use the apply_patch tool instead of exec_command.") {
 		return false
 	}
 	return true
